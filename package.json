@@ -1,0 +1,18 @@
+{
+  "name": "flickering-humming-prism",
+  "version": "1.0.0",
+  "description": "Web tư vấn user-admin kết nối bên thứ 3 (giai đoạn 1)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "better-sqlite3": "^11.8.1",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "express-socket.io-session": "^1.5.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
+  }
+}
