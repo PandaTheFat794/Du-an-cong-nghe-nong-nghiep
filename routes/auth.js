@@ -43,4 +43,33 @@ router.get('/me', (req, res) => {
   res.json(payload);
 });
 
+// POST /api/me/password: đổi mật khẩu (mọi role đã đăng nhập)
+router.post('/me/password', auth.requireAuth, (req, res) => {
+  const { current_password, new_password } = req.body || {};
+  if (!current_password || !new_password) {
+    return res.status(400).json({ error: 'Thiếu mật khẩu hiện tại hoặc mật khẩu mới' });
+  }
+  if (new_password.length < 6) {
+    return res.status(400).json({ error: 'Mật khẩu mới cần tối thiểu 6 ký tự' });
+  }
+  const user = getUserByUsername(req.user.username);
+  if (!bcrypt.compareSync(current_password, user.password_hash)) {
+    return res.status(401).json({ error: 'Mật khẩu hiện tại không đúng' });
+  }
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(new_password, 10), user.id);
+  res.json({ success: true });
+});
+
+// DELETE /api/me: khách hàng tự xóa tài khoản (cascade xóa conversation + lịch sử chat)
+router.delete('/me', auth.requireAuth, (req, res) => {
+  if (req.user.role !== 'user') {
+    return res.status(403).json({ error: 'Chỉ khách hàng tự xóa được tài khoản của mình' });
+  }
+  db.prepare('DELETE FROM users WHERE id = ?').run(req.user.id);
+  req.session.destroy(() => {
+    res.clearCookie('connect.sid');
+    res.json({ success: true });
+  });
+});
+
 module.exports = router;

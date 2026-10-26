@@ -60,6 +60,29 @@ app.get('/partner', pageGuard('partner'), (req, res) => res.sendFile(path.join(_
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ==== Socket.io events ====
+
+// Chống spam: tối đa 8 tin nhắn / 10 giây / user
+const RATE_WINDOW_MS = 10 * 1000;
+const RATE_MAX_MESSAGES = 8;
+const msgTimestamps = new Map(); // userId -> [timestamps]
+
+function isFlooding(userId) {
+  const now = Date.now();
+  const recent = (msgTimestamps.get(userId) || []).filter((t) => now - t < RATE_WINDOW_MS);
+  recent.push(now);
+  msgTimestamps.set(userId, recent);
+  return recent.length > RATE_MAX_MESSAGES;
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [userId, times] of msgTimestamps) {
+    const fresh = times.filter((t) => now - t < RATE_WINDOW_MS);
+    if (fresh.length) msgTimestamps.set(userId, fresh);
+    else msgTimestamps.delete(userId);
+  }
+}, RATE_WINDOW_MS).unref();
+
 // Hợp đồng sự kiện:
 //   client → server: 'join' {convId}, 'message' {convId, content, attachment?}, 'read' {convId}
 //   server → client: 'joined', 'message', 'unread-badge', 'badge-cleared', 'user-message' (room admins), 'error'
@@ -99,6 +122,9 @@ io.on('connection', (socket) => {
     const isAdmin = user.role === 'admin';
     if (!isOwner && !isAdmin) {
       return socket.emit('error', { message: 'Bạn không có quyền gửi tin nhắn vào conversation này.' });
+    }
+    if (isFlooding(user.id)) {
+      return socket.emit('error', { message: 'Bạn gửi tin quá nhanh, vui lòng đợi vài giây.' });
     }
 
     const text = (content || '').toString().trim();

@@ -6,12 +6,12 @@
   <title>Tư vấn Nông nghiệp - Chat</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
-<body>
+<body data-account-controls="headerControls">
   <div id="root">
     <div class="chat-area">
       <div class="chat-header">
         <h2>Chuyên gia tư vấn</h2>
-        <div class="chat-controls">
+        <div class="chat-controls" id="headerControls">
           <span class="partner-chip" id="partnerChip" hidden></span>
           <button class="chat-btn" id="logoutBtn" type="button">Đăng xuất</button>
         </div>
@@ -31,5 +31,6 @@
   <script src="/ws/socket.io.js"></script>
   <script src="/js/common.js"></script>
   <script src="/js/chat.js"></script>
+  <script src="/js/account.js"></script>
 </body>
 </html>

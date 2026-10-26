@@ -85,4 +85,18 @@ router.post('/conversations/:convId/connect', requireAuth, requireRole('admin'),
   res.json({ success: true, conversationId: convId, partnerId: Number(partner_id) });
 });
 
+/**
+ * DELETE /api/admin/users/:userId
+ * Admin xóa tài khoản khách hàng (cascade xóa conversation + tin nhắn).
+ */
+router.delete('/users/:userId', requireAuth, requireRole('admin'), (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+  const target = Number.isInteger(userId) ? db.prepare('SELECT * FROM users WHERE id = ?').get(userId) : null;
+  if (!target || target.role !== 'user') {
+    return res.status(404).json({ error: 'Không tìm thấy khách hàng' });
+  }
+  db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+  res.json({ success: true, deletedUserId: userId });
+});
+
 module.exports = router;

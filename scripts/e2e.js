@@ -250,7 +250,65 @@ async function main() {
     partnerSock.close();
   }
 
-  // ===== 6. Session persist qua restart =====
+  // ===== 6. Rate-limit, upload giả mạo, đổi mật khẩu, xóa tài khoản =====
+  r = await httpJson('/api/upload', { method: 'POST', formData: (() => {
+    const fd = new FormData();
+    fd.append('file', new Blob([Buffer.from('MZThisIsNotAPng')], { type: 'image/png' }), 'fake.png');
+    return fd;
+  })(), cookie: user.cookie });
+  check('upload nội dung giả mạo .png → 400', r.status === 400 && /không khớp/i.test(r.data.error || ''), JSON.stringify(r.data));
+
+  // Flood: user riêng để không ảnh hưởng các test khác
+  const spamName = 'spam_' + Date.now().toString(36);
+  r = await httpJson('/api/register', { method: 'POST', body: { username: spamName, password: 'pass123', display_name: 'Spammer' } });
+  const spamId = r.data.userId;
+  const spam = await loginAndGetSession(spamName, 'pass123');
+  const spamMe = await httpJson('/api/me', { cookie: spam.cookie });
+  const spamConvId = spamMe.data.conversation_id;
+
+  r = await httpJson('/api/me/password', { method: 'POST', body: { current_password: 'admin123', new_password: 'x' }, cookie: admin.cookie });
+  check('đổi mk ngắn <6 ký tự → 400', r.status === 400, `status ${r.status}`);
+
+  const spamSock = connectSocket(spam.sessionId);
+  try {
+    spamSock.emit('join', { convId: spamConvId });
+    await waitEvent(spamSock, 'joined', (d) => d.convId === spamConvId);
+    const floodErrP = waitEvent(spamSock, 'error', (e) => /quá nhanh/i.test(e.message), 8000);
+    for (let i = 1; i <= 10; i++) spamSock.emit('message', { convId: spamConvId, content: 'spam ' + i });
+    await floodErrP;
+    check('rate-limit: >8 tin/10s bị chặn', true);
+  } finally {
+    spamSock.close();
+  }
+
+  r = await httpJson('/api/me/password', { method: 'POST', body: { current_password: 'sai', new_password: 'newpass123' }, cookie: spam.cookie });
+  check('đổi mk với mật khẩu hiện tại sai → 401', r.status === 401, `status ${r.status}`);
+  r = await httpJson('/api/me/password', { method: 'POST', body: { current_password: 'pass123', new_password: 'newpass123' }, cookie: spam.cookie });
+  check('đổi mk đúng → 200', r.status === 200, JSON.stringify(r.data));
+  r = await httpJson('/api/login', { method: 'POST', body: { username: spamName, password: 'pass123' } });
+  check('login bằng mật khẩu cũ → 401', r.status === 401, `status ${r.status}`);
+  r = await httpJson('/api/login', { method: 'POST', body: { username: spamName, password: 'newpass123' } });
+  check('login bằng mật khẩu mới → 200', r.status === 200, `status ${r.status}`);
+
+  r = await httpJson('/api/me', { method: 'DELETE', cookie: admin.cookie });
+  check('admin tự xóa qua /api/me → 403 (chỉ role user)', r.status === 403, `status ${r.status}`);
+
+  r = await httpJson(`/api/admin/users/${spamId}`, { method: 'DELETE', cookie: admin.cookie });
+  check('admin xóa khách → 200', r.status === 200 && r.data.success, JSON.stringify(r.data));
+  r = await httpJson('/api/login', { method: 'POST', body: { username: spamName, password: 'newpass123' } });
+  check('user bị xóa không login được → 401', r.status === 401, `status ${r.status}`);
+  r = await httpJson(`/api/conversations/${spamConvId}/messages`, { cookie: admin.cookie });
+  check('cascade: conversation của user bị xóa cũng mất → 404', r.status === 404, `status ${r.status}`);
+
+  const tmpName = 'tmp_' + Date.now().toString(36);
+  await httpJson('/api/register', { method: 'POST', body: { username: tmpName, password: 'pass123', display_name: 'Tmp' } });
+  const tmp = await loginAndGetSession(tmpName, 'pass123');
+  r = await httpJson('/api/me', { method: 'DELETE', cookie: tmp.cookie });
+  check('user tự xóa tài khoản → 200', r.status === 200 && r.data.success, JSON.stringify(r.data));
+  r = await httpJson('/api/login', { method: 'POST', body: { username: tmpName, password: 'pass123' } });
+  check('sau tự xóa, login fail → 401', r.status === 401, `status ${r.status}`);
+
+  // ===== 7. Session persist qua restart =====
   server.kill();
   await new Promise((res) => setTimeout(res, 500));
   server = await startServer();

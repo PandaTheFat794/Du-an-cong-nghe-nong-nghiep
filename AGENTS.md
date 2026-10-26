@@ -10,7 +10,8 @@ He thong web tu van truc tuyen (mo phong giao dien kieu Zalo chat):
 - **Backend**: Node.js + Express + Socket.io (WebSocket chat real-time, path: /ws; client bundle nam tai `/ws/socket.io.js`).
 - **Database**: SQLite qua better-sqlite3 (file `data/app.db`, module db.js) gom 4 bang: users, conversations, messages, sessions.
 - **Auth**: express-session + **SQLite session store tu viet** (`session-store.js`, sống sót qua restart). Socket handshake xac thuc bang `?sessionId=` (tra ve tu /api/login) qua cung store.
-- **Upload**: multer → `public/uploads/`, toi da 5MB, chi nhan anh (jpg/png/gif/webp) va tai lieu (pdf/doc/docx).
+- **Upload**: multer → `public/uploads/`, toi da 5MB, whitelist phan mo rong (jpg/png/gif/webp/pdf/doc/docx) + **kiem tra magic bytes** chan file gia mao dinh dang.
+- **Chong spam**: socket 'message' gioi han 8 tin / 10 giay / user (server.js, token-window Map).
 - **Frontend**: HTML5, CSS3, Vanilla JavaScript thuan (khong dung build tools/bundler).
 
 ## 3. Cau truc thu muc
@@ -19,9 +20,9 @@ He thong web tu van truc tuyen (mo phong giao dien kieu Zalo chat):
 - session-store.js: Store express-session tren SQLite + getSessionUser() cho socket.
 - auth.js: Middleware requireAuth/requireRole + login/logout/me.
 - routes/:
-  - auth.js: /api/register, /api/login, /api/logout, /api/me (kem conversation_id cho role user).
+  - auth.js: /api/register, /api/login, /api/logout, /api/me (kem conversation_id cho role user), POST /api/me/password (doi mat khau), DELETE /api/me (user tu xoa tai khoan, cascade xoa lich su).
   - chat.js: GET /api/conversations/:id/messages (owner/admin/partner duoc gan).
-  - admin.js: GET /api/admin/users, GET /api/admin/partners, POST /api/admin/conversations/:id/connect.
+  - admin.js: GET /api/admin/users, GET /api/admin/partners, POST /api/admin/conversations/:id/connect, DELETE /api/admin/users/:id (admin xoa khach).
   - partner.js: GET /api/partner/conversations.
   - upload.js: POST /api/upload (multipart field "file").
 - public/:
@@ -31,11 +32,12 @@ He thong web tu van truc tuyen (mo phong giao dien kieu Zalo chat):
   - partner.html: Danh sach khach duoc gan + lich su read-only.
   - css/style.css: Layout Zalo-style.
   - js/common.js: api(), uploadFile(), messageEl() (render textContent, chong XSS), parse thoi gian UTC tu SQLite.
+  - js/account.js: panel "Tai khoan" tu mount qua <body data-account-controls="..."> — doi mat khau (moi role) + tu xoa tai khoan (role user).
   - js/{auth, chat, admin, partner}.js: Logic frontend tuong ung.
 - scripts/e2e.js: E2E test tu dong (REST + socket + upload + restart persist).
 
 ## 4. Trang thai hien tai & Luu y
-- Ca 3 luong User–Admin–Partner da chay that (E2E 27/27 + UI check 19/19 tren Edge headless).
+- Ca 3 luong User–Admin–Partner da chay that (E2E 40/40 + UI check 22/22 tren Edge headless).
 - Tai khoan seed: **admin/admin123**, **partner1/admin123**, **user1/user123** (luu y: partner1 dung hash cua admin123).
 - Session da persist: restart server khong lam mat dang nhap (cookie + sessionId deu con hieu luc).
 - Socket event contract: client → `join {convId}`, `message {convId, content, attachment?}`, `read {convId}`; server → `joined`, `message`, `unread-badge`, `badge-cleared`, `user-message` (room `admins`), `error`.
@@ -45,6 +47,6 @@ He thong web tu van truc tuyen (mo phong giao dien kieu Zalo chat):
 - `npm install` → `npm start` (http://localhost:3000) → `npm run e2e` (server tam tren port 3100, DB tach `data/e2e.db`).
 
 ## 6. Cong viec tiep theo goi y
-- Notify realtime cho Admin khi sidebar dang hien (hien tai refresh qua event user-message, du dung nhung chua debounce).
-- Chan tin nhan rua (rate limit) va scan noi dung upload.
-- Xoa tai khoan/doi mat khau (chua co UI).
+- File upload cua user bi xoa van con tren dia (`public/uploads/`) — can doi khi don rac.
+- Phan trang / virtual hoa lich su chat dai.
+- Bao mat them: CSRF token (hien cookie SameSite mac dinh Lax), rate-limit cho API login (hien moi chi chan spam socket message).

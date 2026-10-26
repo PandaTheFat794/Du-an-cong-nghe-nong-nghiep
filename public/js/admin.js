@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let selectedConvId = null;
   let partners = [];
   let pendingFile = null;
+  let usersReloadTimer = null;
 
   function flashStatus(text) {
     socketStatus.textContent = text;
@@ -59,10 +60,46 @@ document.addEventListener('DOMContentLoaded', async () => {
       badge.textContent = u.unread_count;
       badge.hidden = !u.unread_count;
 
-      item.append(info, badge);
+      const actions = document.createElement('div');
+      actions.className = 'user-actions';
+      const del = document.createElement('button');
+      del.className = 'user-delete';
+      del.type = 'button';
+      del.textContent = 'Xóa';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteUser(u, item);
+      });
+      actions.append(badge, del);
+
+      item.append(info, actions);
       item.addEventListener('click', () => selectConversation(u.conversation_id, u.display_name));
       list.appendChild(item);
     }
+  }
+
+  async function deleteUser(u, itemEl) {
+    if (!confirm(`Xóa tài khoản "${u.display_name}" (${u.username})? Toàn bộ lịch sử chat sẽ mất.`)) return;
+    const { data } = await api(`/admin/users/${u.id}`, { method: 'DELETE' });
+    if (data && data.success) {
+      itemEl.remove();
+      if (u.conversation_id === selectedConvId) resetChatArea();
+    } else {
+      flashStatus((data && data.error) || 'Không xóa được tài khoản');
+    }
+  }
+
+  function resetChatArea() {
+    selectedConvId = null;
+    chatTitle.textContent = 'Chọn một khách hàng để tư vấn';
+    [msgInput, sendBtn, attachBtn].forEach((el) => { el.disabled = true; });
+    partnerSelect.hidden = true;
+    connectPartnerBtn.hidden = true;
+    messagesArea.innerHTML = '';
+    const hint = document.createElement('div');
+    hint.className = 'no-partner';
+    hint.textContent = 'Chưa chọn cuộc trò chuyện';
+    messagesArea.appendChild(hint);
   }
 
   function setBadge(convId, count) {
@@ -146,7 +183,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     messagesArea.appendChild(messageEl(msg, msg.senderRole === 'admin'));
     scrollBottom();
   });
-  socket.on('user-message', () => loadUsers()); // tin mới từ khách → refresh sidebar
+  socket.on('user-message', () => {
+    clearTimeout(usersReloadTimer);
+    usersReloadTimer = setTimeout(loadUsers, 400); // debounce khi khách gửi dồn dập
+  }); // tin mới từ khách → refresh sidebar
   socket.on('unread-badge', ({ convId, count }) => {
     if (convId !== selectedConvId) setBadge(convId, count);
   });

@@ -6,7 +6,7 @@
   <title>Tư vấn Nông nghiệp - Admin</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
-<body>
+<body data-account-controls="headerControls">
   <div id="root">
     <div class="admin-sidebar">
       <div class="admin-header">
@@ -19,7 +19,7 @@
     <div class="chat-area">
       <div class="chat-header">
         <h2 id="chatTitle">Chọn một khách hàng để tư vấn</h2>
-        <div class="chat-controls">
+        <div class="chat-controls" id="headerControls">
           <select class="partner-select" id="partnerSelect" hidden></select>
           <button class="chat-btn" id="connectPartnerBtn" hidden type="button">Kết nối Partner</button>
           <button class="chat-btn" id="logoutBtn" type="button">Đăng xuất</button>
@@ -42,5 +42,6 @@
   <script src="/ws/socket.io.js"></script>
   <script src="/js/common.js"></script>
   <script src="/js/admin.js"></script>
+  <script src="/js/account.js"></script>
 </body>
 </html>

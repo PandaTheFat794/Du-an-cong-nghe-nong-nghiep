@@ -10,6 +10,9 @@ const db = new Database(DB_PATH, {
   verbose: process.env.DB_DEBUG ? console.log : undefined,
 });
 
+// Bật ràng buộc khóa ngoại để DELETE user tự cascade sang conversations/messages
+db.pragma('foreign_keys = ON');
+
 // Bảng users: id, username (unique), password_hash, display_name, role, created_at
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (

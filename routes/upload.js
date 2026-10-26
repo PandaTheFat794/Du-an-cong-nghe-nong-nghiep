@@ -24,6 +24,22 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage, limits: { fileSize: MAX_FILE_SIZE } });
 
+// Kiểm tra chữ ký file (magic bytes) khớp với phần mở rộng → chặn file giả mạo
+function hasValidSignature(buf, ext) {
+  const starts = (offset, bytes) => bytes.every((b, i) => buf[offset + i] === b);
+  switch (ext) {
+    case '.jpg':
+    case '.jpeg': return starts(0, [0xff, 0xd8, 0xff]);
+    case '.png': return starts(0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    case '.gif': return starts(0, [0x47, 0x49, 0x46, 0x38]);
+    case '.webp': return starts(0, [0x52, 0x49, 0x46, 0x46]) && buf.subarray(8, 12).toString('ascii') === 'WEBP';
+    case '.pdf': return starts(0, [0x25, 0x50, 0x44, 0x46]);
+    case '.doc': return starts(0, [0xd0, 0xcf, 0x11, 0xe0]);
+    case '.docx': return starts(0, [0x50, 0x4b, 0x03, 0x04]);
+    default: return false;
+  }
+}
+
 // POST /api/upload (multipart/form-data, field "file") → { url, name }
 router.post('/upload', requireAuth, (req, res) => {
   upload.single('file')(req, res, (err) => {
@@ -41,6 +57,21 @@ router.post('/upload', requireAuth, (req, res) => {
     if (!ALLOWED_EXTENSIONS.has(ext)) {
       fs.unlink(req.file.path, () => {});
       return res.status(400).json({ error: 'Chỉ chấp nhận ảnh (jpg/png/gif/webp) hoặc tài liệu (pdf/doc/docx)' });
+    }
+
+    let header = Buffer.alloc(12);
+    try {
+      const fd = fs.openSync(req.file.path, 'r');
+      const read = fs.readSync(fd, header, 0, 12, 0);
+      fs.closeSync(fd);
+      header = header.subarray(0, read);
+    } catch {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: 'Không đọc được file' });
+    }
+    if (!hasValidSignature(header, ext)) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: 'Nội dung file không khớp định dạng khai báo' });
     }
 
     res.status(201).json({
