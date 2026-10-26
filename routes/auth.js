@@ -3,7 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const auth = require('../auth');
 const { createRateLimiter } = require('../rate-limit');
-const { db, getUserByUsername, getOrCreateConversation } = require('../db');
+const { db, getUserByUsername, getUserById, getOrCreateConversation, getOrCreatePartnerThread } = require('../db');
 
 const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,32}$/;
 const PASSWORD_MIN = 6;
@@ -56,7 +56,7 @@ router.post('/register', registerLimiter, (req, res) => {
       'INSERT INTO users (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)'
     ).run(uname, passwordHash, displayName, 'user');
     // Mỗi user tự động có 1 conversation 1-1 với admin
-    db.prepare('INSERT INTO conversations (user_id) VALUES (?)').run(info.lastInsertRowid);
+    getOrCreateConversation(info.lastInsertRowid);
     res.status(201).json({ success: true, userId: Number(info.lastInsertRowid) });
   } catch (e) {
     console.error('register error:', e);
@@ -67,7 +67,7 @@ router.post('/register', registerLimiter, (req, res) => {
 router.post('/login', loginLimiter, auth.login);
 router.post('/logout', auth.logout);
 
-// GET /api/me: user hiện tại; role 'user' được kèm conversation_id để vào trang chat
+// GET /api/me: user hiện tại; role 'user' được kèm conversation với admin + conversation riêng với partner
 router.get('/me', (req, res) => {
   if (!req.session || !req.session.user) {
     return res.status(401).json({ error: 'Chưa đăng nhập' });
@@ -75,7 +75,20 @@ router.get('/me', (req, res) => {
   const user = req.session.user;
   const payload = { success: true, user };
   if (user.role === 'user') {
-    payload.conversation_id = getOrCreateConversation(user.id).id;
+    const conv = getOrCreateConversation(user.id);
+    payload.conversation_id = conv.id;
+    payload.partner = null;
+    if (conv.partner_id) {
+      const partner = getUserById(conv.partner_id);
+      if (partner) {
+        const thread = getOrCreatePartnerThread(user.id, partner.id, 'partner_user');
+        payload.partner = {
+          id: partner.id,
+          display_name: partner.display_name,
+          conversation_id: thread.id,
+        };
+      }
+    }
   }
   res.json(payload);
 });

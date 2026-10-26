@@ -77,6 +77,18 @@ async function login(ctx, user, pass, expectPath) {
   return page;
 }
 
+// Nút nào trong header vượt mép phải khung chat (bị cắt) → trả về nhãn
+async function headerOverflow(page) {
+  return page.evaluate(() => {
+    const headerRight = document.querySelector('.chat-header').getBoundingClientRect().right;
+    return [...document.querySelectorAll('.chat-header .chat-controls > *')]
+      .filter((el) => !el.hidden && el.getClientRects().length)
+      .map((el) => ({ text: el.textContent.trim().replace(/\s+/g, ' ').slice(0, 24), right: el.getBoundingClientRect().right }))
+      .filter((x) => x.right > headerRight + 1)
+      .map((x) => x.text);
+  });
+}
+
 (async () => {
   const server = process.env.UI_BASE ? null : startServer();
   let browser = null;
@@ -100,7 +112,8 @@ async function login(ctx, user, pass, expectPath) {
     const ctxU = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const U = await login(ctxU, 'user1', 'user123', '/chat');
     ok('user1 login → redirect /chat', U.url());
-    assert(!(await U.locator('#partnerChip').isVisible()), '🔍 chưa gán partner → chip ẩn', 'partnerChip visible=false');
+    assert(!(await U.locator('#threadTabs').isVisible()),
+      '🔍 chưa gán partner → chỉ có luồng chat với admin (tab partner ẩn)', 'threadTabs visible=false');
     await U.screenshot({ path: SHOT('01-user-chat.png') });
 
     await U.fill('#msgInput', 'Chào admin, rau nhà em bị vàng lá');
@@ -143,7 +156,7 @@ async function login(ctx, user, pass, expectPath) {
     const A = await login(ctxA, 'admin', 'admin123', '/admin');
     ok('admin login → redirect /admin', A.url());
     await A.waitForSelector('.user-item');
-    const badge = await A.locator('.user-unread').first().innerText();
+    const badge = await A.locator('.user-unread:not(.partner)').first().innerText();
     assert(badge === '1', 'sidebar admin hiện badge unread = 1', `badge="${badge}"`);
     await A.screenshot({ path: SHOT('02-admin-sidebar.png') });
 
@@ -153,10 +166,10 @@ async function login(ctx, user, pass, expectPath) {
     assert(histMsg.includes('vàng lá'), 'admin mở conv → history có tin của user', histMsg.slice(0, 40));
 
     await A.waitForFunction(() => {
-      const b = document.querySelector('.user-unread');
+      const b = document.querySelector('.user-unread:not(.partner)');
       return !!b && b.hidden;
     }, null, { timeout: 5000 }).catch(() => {});
-    const badgeHidden = await A.locator('.user-unread').first().isVisible().catch(() => false);
+    const badgeHidden = await A.locator('.user-unread:not(.partner)').first().isVisible().catch(() => false);
     assert(!badgeHidden, 'admin mở chat → badge unread bị ẩn (socket read)', `visible=${badgeHidden}`);
 
     // ===== Typing indicator: admin soạn → user thấy bubble 3 chấm =====
@@ -203,6 +216,12 @@ async function login(ctx, user, pass, expectPath) {
     await toastLoc.waitFor({ state: 'visible', timeout: 5000 });
     const status = await toastLoc.innerText();
     assert(/kết nối/i.test(status), 'admin bấm Kết nối Partner → toast xác nhận', status);
+    await A.waitForSelector('#threadTabs:visible .view-tab[data-thread="partner"]', { timeout: 4000 });
+    const partnerTabTxt = await A.locator('#threadTabs .view-tab[data-thread="partner"]').innerText();
+    assert(partnerTabTxt.includes('Partner Test'), 'gán partner → admin có tab chat riêng với partner', partnerTabTxt);
+    const clipped = await headerOverflow(A);
+    assert(clipped.length === 0, 'header admin không tràn nút ra ngoài khung', clipped.join(' | ') || 'không tràn');
+    await A.waitForSelector('.toast', { state: 'detached', timeout: 6000 });
     await A.waitForTimeout(450);
     await A.screenshot({ path: SHOT('04-admin-da-gan-partner.png') });
 
@@ -216,7 +235,7 @@ async function login(ctx, user, pass, expectPath) {
     await A.click('#processDrawerClose');
     await A.waitForSelector('.process-overlay', { state: 'hidden', timeout: 4000 });
 
-    // ===== Partner: xem nhật ký canh tác + trò chuyện 3 bên =====
+    // ===== Partner: nhật ký + 2 luồng chat riêng =====
     const ctxP = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const P = await login(ctxP, 'partner1', 'admin123', '/partner');
     ok('partner1 login → redirect /partner', P.url());
@@ -227,24 +246,28 @@ async function login(ctx, user, pass, expectPath) {
     await P.waitForSelector('.partner-item.active', { timeout: 5000 });
     const defaultTab = await P.locator('.view-tab.active').innerText();
     assert(defaultTab.includes('Nhật ký'), 'partner mặc định mở tab Nhật ký canh tác', defaultTab.trim());
+    const partnerTabs = await P.locator('#viewTabs .view-tab').allInnerTexts();
+    assert(partnerTabs.length === 3
+      && partnerTabs.some((t) => t.includes('Nhắn khách hàng'))
+      && partnerTabs.some((t) => t.includes('Nhắn admin')),
+      'partner có 3 tab: nhật ký + chat riêng khách + chat riêng admin', partnerTabs.join(' | '));
     await P.waitForSelector('.process-entry', { timeout: 6000 });
     const partnerProc = await P.locator('.process-entry-title').first().innerText();
     assert(partnerProc.includes('Bón lót'), 'partner xem được nhật ký khách hàng vừa ghi', partnerProc);
     assert((await P.locator('.process-entry-media img').count()) >= 1, 'partner thấy ảnh đính kèm trong nhật ký');
     await P.screenshot({ path: SHOT('05-partner-nhat-ky.png') });
 
-    await P.click('.view-tab[data-view="chat"]');
+    // Partner → khách (riêng tư, không lẫn chat admin)
+    await P.click('.view-tab[data-view="customer"]');
     await P.waitForSelector('#chatPane:visible', { timeout: 4000 });
-    await P.waitForSelector('#partnerMessages .message', { timeout: 5000 });
-    const pCount = await P.locator('#partnerMessages .message').count();
-    assert(pCount >= 3, 'partner xem được lịch sử chat trong tab Trò chuyện', `${pCount} tin`);
-    assert(await P.locator('#msgInput').isVisible(), 'partner có ô nhập tin để trao đổi với khách + admin', 'msgInput visible');
+    assert((await P.locator('#partnerMessages .message').count()) === 0,
+      '🔍 thread partner↔khách bắt đầu trống (không lẫn lịch sử admin↔khách)', '0 tin');
+    assert(await P.locator('#msgInput').isVisible(), 'partner có ô nhập tin nhắn riêng cho khách', 'msgInput visible');
 
-    await P.fill('#msgInput', 'Partner đã xem nhật ký, tư vấn thêm nhé');
+    await P.fill('#msgInput', 'Nhắn riêng cho khách nhé');
     await P.click('#sendBtn');
     await P.waitForSelector('#partnerMessages .message.user', { timeout: 5000 });
-    ok('partner gửi tin → bubble của partner hiện bên phải');
-
+    ok('partner gửi tin riêng cho khách → bubble của partner hiện bên phải');
     try {
       await P.waitForFunction(
         () => !document.querySelector('#partnerMessages .message.pending'),
@@ -253,34 +276,106 @@ async function login(ctx, user, pass, expectPath) {
       ok('🔍 server echo thay bubble "đang gửi" bằng tin thật');
     } catch { bad('bubble pending của partner không được thay', 'vẫn còn .message.pending sau 6s'); }
 
-    try {
-      await A.waitForFunction(
-        () => [...document.querySelectorAll('#messagesArea .message.role-partner')].some((el) => el.textContent.includes('tư vấn thêm')),
-        null, { timeout: 6000 }
-      );
-      ok('⚡ admin nhận tin partner realtime (chat 3 bên)');
-    } catch { bad('admin nhận tin partner', 'timeout 6s, không thấy bubble role-partner'); }
+    await P.waitForTimeout(700);
+    const adminLeak = await A.locator('#messagesArea .message.role-partner').count();
+    assert(adminLeak === 0, '🔍 admin KHÔNG thấy tin partner↔khách (cách ly thread)', `role-partner=${adminLeak}`);
 
-    try {
-      await U.waitForFunction(
-        () => [...document.querySelectorAll('#messagesArea .message.role-partner')].some((el) => el.textContent.includes('tư vấn thêm')),
-        null, { timeout: 6000 }
-      );
-      ok('⚡ user nhận tin partner realtime');
-    } catch { bad('user nhận tin partner', 'timeout 6s, không thấy bubble role-partner'); }
-    await P.waitForTimeout(350); // chờ animation msgIn kết thúc trước khi chụp
-    await P.screenshot({ path: SHOT('05b-partner-chat.png') });
+    // Partner → admin (riêng tư) → badge amber, không lẫn vào chat khách
+    await P.click('.view-tab[data-view="admin"]');
+    await P.waitForSelector('#chatPane:visible', { timeout: 4000 });
+    assert((await P.locator('#partnerMessages .message').count()) === 0, '🔍 thread partner↔admin bắt đầu trống', '0 tin');
+    await P.fill('#msgInput', 'Báo cáo riêng cho admin');
+    await P.click('#sendBtn');
+    await P.waitForSelector('#partnerMessages .message.user', { timeout: 5000 });
+    ok('partner gửi tin riêng cho admin');
+
+    await A.waitForSelector('.user-unread.partner:visible', { timeout: 8000 });
+    const partnerBadgeTxt = await A.locator('.user-unread.partner').first().innerText();
+    assert(partnerBadgeTxt === '1', 'sidebar admin hiện badge partner riêng khi partner nhắn', `badge="${partnerBadgeTxt}"`);
+    const adminPartnerLeak = await A.locator('#messagesArea .message.role-partner').count();
+    assert(adminPartnerLeak === 0, '🔍 admin đang mở chat khách → tin partner không lẫn vào khung chat', `role-partner=${adminPartnerLeak}`);
+    await A.screenshot({ path: SHOT('05b-admin-badge-partner.png') });
+
+    // Admin chuyển sang tab Partner: thấy tin, badge ẩn, trả lời
+    await A.click('#threadTabs .view-tab[data-thread="partner"]');
+    await A.waitForFunction(
+      () => [...document.querySelectorAll('#messagesArea .message')].some((el) => el.textContent.includes('Báo cáo riêng cho admin')),
+      null, { timeout: 6000 }
+    ).then(
+      () => ok('admin mở tab Partner → thấy tin riêng của partner'),
+      () => bad('admin không thấy tin partner trong tab riêng', 'timeout 6s')
+    );
+    await A.waitForFunction(() => {
+      const b = document.querySelector('.user-unread.partner');
+      return !!b && b.hidden;
+    }, null, { timeout: 5000 }).catch(() => {});
+    assert(!(await A.locator('.user-unread.partner').first().isVisible().catch(() => false)),
+      'admin mở tab Partner → badge partner bị ẩn (đã đọc)');
+    const clippedPartnerTab = await headerOverflow(A);
+    assert(clippedPartnerTab.length === 0, 'header admin (tab Partner) không tràn nút ra ngoài khung', clippedPartnerTab.join(' | ') || 'không tràn');
+    await A.waitForTimeout(400);
+    await A.screenshot({ path: SHOT('05c-admin-partner-chat.png') });
+
+    await A.fill('#msgInput', 'Phản hồi riêng cho partner');
+    await A.click('#sendBtn');
+    await A.waitForSelector('#messagesArea .message.user', { timeout: 5000 });
+    await P.waitForFunction(
+      () => [...document.querySelectorAll('#partnerMessages .message')].some((el) => el.textContent.includes('Phản hồi riêng cho partner')),
+      null, { timeout: 6000 }
+    ).then(
+      () => ok('⚡ partner nhận tin riêng của admin realtime'),
+      () => bad('partner không nhận tin admin trong tab riêng', 'timeout 6s')
+    );
+    await P.waitForTimeout(350);
+    await P.screenshot({ path: SHOT('05d-partner-chat-admin.png') });
+
+    // ===== User reload → tab chat riêng với partner =====
+    await U.reload();
+    await U.waitForSelector('#threadTabs:visible .view-tab[data-thread="partner"]', { timeout: 6000 });
+    const userPartnerTab = await U.locator('#threadTabs .view-tab[data-thread="partner"]').innerText();
+    assert(userPartnerTab.includes('Partner Test'), 'user reload → header có tab chat riêng với partner', userPartnerTab);
+    await U.click('#threadTabs .view-tab[data-thread="partner"]');
+    await U.waitForFunction(
+      () => [...document.querySelectorAll('#messagesArea .message')].some((el) => el.textContent.includes('Nhắn riêng cho khách nhé')),
+      null, { timeout: 6000 }
+    ).then(
+      () => ok('user thấy lịch sử chat riêng với partner (không lẫn chat admin)'),
+      () => bad('user không thấy tin partner trong tab riêng', 'timeout 6s')
+    );
+    const userAdminLeak = await U.locator('#messagesArea .message').filter({ hasText: 'Báo cáo riêng cho admin' }).count();
+    assert(userAdminLeak === 0, '🔍 user KHÔNG thấy tin partner↔admin', `leak=${userAdminLeak}`);
+    await U.fill('#msgInput', 'Cảm ơn partner');
+    await U.click('#sendBtn');
+    await U.waitForSelector('#messagesArea .message.user', { timeout: 5000 });
+    await U.waitForTimeout(400);
+    await U.screenshot({ path: SHOT('09-user-partner-thread.png') });
+
+    await P.waitForFunction(() => {
+      const tab = document.querySelector('.view-tab[data-view="customer"]');
+      return tab && tab.classList.contains('has-new');
+    }, null, { timeout: 6000 }).then(
+      () => ok('⚡ partner đang ở tab admin → tab khách hiện chấm tin mới'),
+      () => bad('partner không thấy chấm tin mới ở tab khách', 'timeout 6s')
+    );
+    await P.click('.view-tab[data-view="customer"]');
+    await P.waitForFunction(
+      () => [...document.querySelectorAll('#partnerMessages .message')].some((el) => el.textContent.includes('Cảm ơn partner')),
+      null, { timeout: 6000 }
+    ).then(
+      () => ok('partner mở tab khách → thấy tin mới của khách'),
+      () => bad('partner không thấy tin khách trong tab riêng', 'timeout 6s')
+    );
+    assert(!(await P.locator('.view-tab[data-view="customer"]').evaluate((el) => el.classList.contains('has-new'))),
+      'mở tab khách → chấm tin mới được xóa');
+    await P.waitForTimeout(400);
+    await P.screenshot({ path: SHOT('06-partner-chat-khach.png') });
+
+    const adminLeakUserPartner = await A.locator('#messagesArea .message').filter({ hasText: 'Cảm ơn partner' }).count();
+    assert(adminLeakUserPartner === 0, '🔍 admin KHÔNG thấy tin khách↔partner', `leak=${adminLeakUserPartner}`);
 
     // 🔍 probe: partner cố vào /admin → pageGuard đá về login
     await P.goto(BASE + '/admin');
     assert(new URL(P.url()).pathname === '/', '🔍 partner gọi thẳng /admin → redirect /', P.url());
-
-    // ===== User thấy chip partner sau refresh (gán xong) =====
-    await U.reload();
-    await U.waitForSelector('#partnerChip:visible', { timeout: 6000 });
-    ok('user reload → header hiện chip "Đồng hành: Partner Test"', await U.locator('#partnerChip').innerText());
-    await U.waitForTimeout(350);
-    await U.screenshot({ path: SHOT('06-user-chip-partner.png') });
 
     // 🔍 probe: register trùng tên qua tab Đăng ký
     const ctxX = await browser.newContext();
@@ -321,7 +416,7 @@ async function login(ctx, user, pass, expectPath) {
     // 🔍 admin đã trả lời → reload sidebar, không được tự sinh badge cho tin của chính mình
     await A.reload();
     await A.waitForSelector('.user-item');
-    const ownBadgeVisible = await A.locator('.user-unread').first().isVisible().catch(() => false);
+    const ownBadgeVisible = await A.locator('.user-unread:not(.partner)').first().isVisible().catch(() => false);
     assert(!ownBadgeVisible, '🔍 admin tự trả lời không tạo badge unread của chính mình', `visible=${ownBadgeVisible}`);
 
     // 🔍 gửi dồn dập vượt rate-limit → tin bị chặn phải được trả lại ô nhập (không mất chữ)

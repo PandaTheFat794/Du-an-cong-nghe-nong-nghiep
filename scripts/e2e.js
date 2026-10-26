@@ -380,20 +380,41 @@ async function main() {
   })(), cookie: user.cookie });
   check('upload .exe → 400 bị chặn', r.status === 400, `status ${r.status}`);
 
-  // ===== 5. Partner: xem nhật ký + chat 3 bên =====
+  // ===== 5. Partner: nhật ký + 2 luồng chat riêng tư =====
   const partners = await httpJson('/api/admin/partners', { cookie: admin.cookie });
   const partnerRow = partners.data.partners.find((p) => p.username === 'partner1');
   r = await httpJson(`/api/admin/conversations/${convId}/connect`, { method: 'POST', body: { partner_id: partnerRow.id }, cookie: admin.cookie });
   check('admin gán partner qua REST → 200', r.status === 200 && r.data.success, JSON.stringify(r.data));
+  const partnerUserConvId = r.data.partnerUserConversationId;
+  const partnerAdminConvId = r.data.partnerConversationId;
+  check('gán partner → tạo 2 thread riêng (partner↔khách, partner↔admin)',
+    partnerUserConvId > 0 && partnerAdminConvId > 0
+      && partnerUserConvId !== partnerAdminConvId && partnerUserConvId !== convId,
+    JSON.stringify({ partnerUserConvId, partnerAdminConvId }));
 
   r = await httpJson('/api/partner/conversations', { cookie: partner.cookie });
-  const myConv = r.data.conversations.find((c) => c.conversation_id === convId);
-  check('partner thấy khách được gán trong list (kèm số nhật ký)',
-    r.status === 200 && !!myConv && myConv.process_count >= 2,
+  const myConv = r.data.conversations.find((c) => c.user_id === user.user.id);
+  check('partner thấy khách được gán (kèm nhật ký + 2 conversation riêng)',
+    r.status === 200 && !!myConv && myConv.process_count >= 2
+      && myConv.user_conversation_id === partnerUserConvId
+      && myConv.admin_conversation_id === partnerAdminConvId,
     JSON.stringify(myConv));
 
+  // Phân quyền REST tách biệt từng thread
   r = await httpJson(`/api/conversations/${convId}/messages`, { cookie: partner.cookie });
-  check('partner xem được lịch sử chat', r.status === 200 && r.data.messages.length >= 2, `messages ${r.data.messages && r.data.messages.length}`);
+  check('partner KHÔNG xem được thread khách↔admin', r.status === 403, `status ${r.status}`);
+  r = await httpJson(`/api/conversations/${partnerUserConvId}/messages`, { cookie: partner.cookie });
+  check('partner xem được thread partner↔khách', r.status === 200, `status ${r.status}`);
+  r = await httpJson(`/api/conversations/${partnerAdminConvId}/messages`, { cookie: partner.cookie });
+  check('partner xem được thread partner↔admin', r.status === 200, `status ${r.status}`);
+  r = await httpJson(`/api/conversations/${partnerUserConvId}/messages`, { cookie: user.cookie });
+  check('khách xem được thread partner↔khách của mình', r.status === 200, `status ${r.status}`);
+  r = await httpJson(`/api/conversations/${partnerAdminConvId}/messages`, { cookie: user.cookie });
+  check('khách KHÔNG xem được thread partner↔admin', r.status === 403, `status ${r.status}`);
+  r = await httpJson(`/api/conversations/${partnerAdminConvId}/messages`, { cookie: admin.cookie });
+  check('admin xem được thread partner↔admin', r.status === 200, `status ${r.status}`);
+  r = await httpJson(`/api/conversations/${partnerUserConvId}/messages`, { cookie: admin.cookie });
+  check('admin KHÔNG xem được thread partner↔khách', r.status === 403, `status ${r.status}`);
 
   r = await httpJson(`/api/process?userId=${user.user.id}`, { cookie: partner.cookie });
   check('partner được gán → xem nhật ký canh tác của khách',
@@ -413,33 +434,109 @@ async function main() {
   const userSock3 = connectSocket(user.sessionId);
   const adminSock3 = connectSocket(admin.sessionId);
   try {
+    // 🔍 Không ai join được thread không thuộc về mình
     partnerSock.emit('join', { convId });
-    await waitEvent(partnerSock, 'joined', (d) => d.convId === convId);
-    check('partner join room để xem realtime', true);
+    const partnerJoinErr = await waitEvent(partnerSock, 'error');
+    check('🔍 partner join thread khách↔admin → bị từ chối', /không có quyền/i.test(partnerJoinErr.message), partnerJoinErr.message);
+    userSock3.emit('join', { convId: partnerAdminConvId });
+    const userJoinErr = await waitEvent(userSock3, 'error');
+    check('🔍 khách join thread partner↔admin → bị từ chối', /không có quyền/i.test(userJoinErr.message), userJoinErr.message);
+    adminSock3.emit('join', { convId: partnerUserConvId });
+    const adminJoinErr = await waitEvent(adminSock3, 'error');
+    check('🔍 admin join thread partner↔khách → bị từ chối', /không có quyền/i.test(adminJoinErr.message), adminJoinErr.message);
 
-    // Chat 3 bên: partner gửi tin → user, admin và chính partner đều nhận
+    // Join đúng thread của từng người
+    partnerSock.emit('join', { convId: partnerUserConvId });
+    await waitEvent(partnerSock, 'joined', (d) => d.convId === partnerUserConvId);
+    partnerSock.emit('join', { convId: partnerAdminConvId });
+    await waitEvent(partnerSock, 'joined', (d) => d.convId === partnerAdminConvId);
+    userSock3.emit('join', { convId: partnerUserConvId });
+    await waitEvent(userSock3, 'joined', (d) => d.convId === partnerUserConvId);
     userSock3.emit('join', { convId });
     await waitEvent(userSock3, 'joined', (d) => d.convId === convId);
-    const beforeUnread = await httpJson('/api/admin/users', { cookie: admin.cookie });
-    const unreadBefore = beforeUnread.data.users.find((u) => u.conversation_id === convId).unread_count;
+    adminSock3.emit('join', { convId: partnerAdminConvId });
+    await waitEvent(adminSock3, 'joined', (d) => d.convId === partnerAdminConvId);
+    adminSock3.emit('join', { convId });
+    await waitEvent(adminSock3, 'joined', (d) => d.convId === convId);
+    check('partner + khách + admin join đúng thread của mình', true);
 
+    const beforePartnerMsg = await httpJson('/api/admin/users', { cookie: admin.cookie });
+    const rowBefore = beforePartnerMsg.data.users.find((u) => u.conversation_id === convId);
+
+    // Partner → khách (riêng tư)
+    let adminLeak = 0;
+    const adminLeakHandler = (m) => { if (m.convId === partnerUserConvId) adminLeak += 1; };
+    adminSock3.on('message', adminLeakHandler);
     const partnerEchoP = waitEvent(partnerSock, 'message', (m) => m.clientId === 'partner-1');
-    const userGotPartnerP = waitEvent(userSock3, 'message', (m) => m.senderRole === 'partner');
-    const adminSideP = waitEvent(adminSock3, 'user-message', (d) => d.convId === convId && d.senderRole === 'partner');
-    partnerSock.emit('message', { convId, content: 'Partner tư vấn cùng anh', clientId: 'partner-1' });
+    const userGotPartnerP = waitEvent(userSock3, 'message', (m) => m.convId === partnerUserConvId && m.senderRole === 'partner');
+    partnerSock.emit('message', { convId: partnerUserConvId, content: 'Tư vấn riêng cho khách', clientId: 'partner-1' });
     const [pEcho, pToUser] = await Promise.all([partnerEchoP, userGotPartnerP]);
-    await adminSideP;
-    check('partner gửi tin → echo về partner + user nhận realtime',
-      pEcho.senderRole === 'partner' && pToUser.senderId === partner.user.id && pToUser.content === 'Partner tư vấn cùng anh',
+    await new Promise((res) => setTimeout(res, 300));
+    adminSock3.off('message', adminLeakHandler);
+    check('partner gửi thread riêng → echo partner + khách nhận realtime',
+      pEcho.senderRole === 'partner' && pToUser.senderId === partner.user.id && pToUser.content === 'Tư vấn riêng cho khách',
       JSON.stringify({ role: pEcho.senderRole, content: pToUser.content }));
-    check('admin nhận user-message khi partner gửi (sidebar refresh)', true);
+    check('🔍 admin không nhận tin partner↔khách (không leak)', adminLeak === 0, `leak=${adminLeak}`);
 
-    const afterUnread = await httpJson('/api/admin/users', { cookie: admin.cookie });
-    const unreadAfter = afterUnread.data.users.find((u) => u.conversation_id === convId).unread_count;
-    check('🔍 tin partner không làm tăng badge unread của admin',
-      unreadAfter === unreadBefore, `before=${unreadBefore}, after=${unreadAfter}`);
+    // Partner → admin (riêng tư) + badge riêng cho admin
+    let userLeak = 0;
+    const userLeakHandler = (m) => { if (m.convId === partnerAdminConvId) userLeak += 1; };
+    userSock3.on('message', userLeakHandler);
+    const adminPartnerMsgP = waitEvent(adminSock3, 'message', (m) => m.convId === partnerAdminConvId && m.senderRole === 'partner');
+    const partnerBadgeP = waitEvent(adminSock3, 'partner-badge', (d) => d.convId === partnerAdminConvId && d.count > 0);
+    partnerSock.emit('message', { convId: partnerAdminConvId, content: 'Báo cáo riêng cho admin' });
+    const [pToAdmin, partnerBadge] = await Promise.all([adminPartnerMsgP, partnerBadgeP]);
+    await new Promise((res) => setTimeout(res, 300));
+    userSock3.off('message', userLeakHandler);
+    check('partner gửi thread partner↔admin → admin nhận realtime',
+      pToAdmin.content === 'Báo cáo riêng cho admin' && pToAdmin.senderRole === 'partner', JSON.stringify(pToAdmin));
+    check('🔍 khách không nhận tin partner↔admin (không leak)', userLeak === 0, `leak=${userLeak}`);
+    check('admin nhận partner-badge khi partner nhắn riêng',
+      partnerBadge.count === 1 && partnerBadge.userId === user.user.id, JSON.stringify(partnerBadge));
 
-    // Nhật ký mới → partner (đang trong room) + admin nhận process-updated
+    r = await httpJson('/api/admin/users', { cookie: admin.cookie });
+    const rowAfterPartner = r.data.users.find((u) => u.conversation_id === convId);
+    check('partner_unread trong sidebar = 1', rowAfterPartner.partner_unread === 1, `partner_unread=${rowAfterPartner.partner_unread}`);
+    check('🔍 tin partner↔khách không làm tăng unread của khách↔admin',
+      rowAfterPartner.unread_count === rowBefore.unread_count,
+      `before=${rowBefore.unread_count}, after=${rowAfterPartner.unread_count}`);
+
+    const clearedP = waitEvent(adminSock3, 'partner-badge-cleared', (d) => d.convId === partnerAdminConvId);
+    adminSock3.emit('read', { convId: partnerAdminConvId });
+    await clearedP;
+    r = await httpJson('/api/admin/users', { cookie: admin.cookie });
+    check('admin đọc thread partner → partner_unread về 0',
+      r.data.users.find((u) => u.conversation_id === convId).partner_unread === 0, 'partner_unread=0');
+
+    // Admin → khách trong thread user_admin; partner không thấy
+    let partnerLeakAdminUser = 0;
+    const partnerLeakHandler = (m) => { if (m.convId === convId) partnerLeakAdminUser += 1; };
+    partnerSock.on('message', partnerLeakHandler);
+    const userGotAdminP = waitEvent(userSock3, 'message', (m) => m.convId === convId && m.senderRole === 'admin' && m.content === 'Admin nhắn riêng khách');
+    adminSock3.emit('message', { convId, content: 'Admin nhắn riêng khách' });
+    await userGotAdminP;
+    await new Promise((res) => setTimeout(res, 300));
+    partnerSock.off('message', partnerLeakHandler);
+    check('admin gửi thread khách↔admin → khách nhận realtime', true);
+    check('🔍 partner không nhận tin khách↔admin (không leak)', partnerLeakAdminUser === 0, `leak=${partnerLeakAdminUser}`);
+
+    // 🔍 Gửi chéo thread bị chặn
+    let crossErrP = waitEvent(partnerSock, 'error');
+    partnerSock.emit('message', { convId, content: 'partner gửi chéo' });
+    const partnerCrossErr = await crossErrP;
+    check('🔍 partner gửi vào thread khách↔admin → bị chặn', /quyền gửi tin/i.test(partnerCrossErr.message), partnerCrossErr.message);
+
+    crossErrP = waitEvent(adminSock3, 'error');
+    adminSock3.emit('message', { convId: partnerUserConvId, content: 'admin gửi chéo' });
+    const adminCrossErr = await crossErrP;
+    check('🔍 admin gửi vào thread partner↔khách → bị chặn', /quyền gửi tin/i.test(adminCrossErr.message), adminCrossErr.message);
+
+    crossErrP = waitEvent(userSock3, 'error');
+    userSock3.emit('message', { convId: partnerAdminConvId, content: 'khách gửi chéo' });
+    const userCrossErr = await crossErrP;
+    check('🔍 khách gửi vào thread partner↔admin → bị chặn', /quyền gửi tin/i.test(userCrossErr.message), userCrossErr.message);
+
+    // Nhật ký mới → partner (thread riêng) + admin (room admins) nhận process-updated
     const partnerProcP = waitEvent(partnerSock, 'process-updated', (d) => d.action === 'created' && d.userId === user.user.id);
     const adminProcP = waitEvent(adminSock3, 'process-updated', (d) => d.action === 'created' && d.userId === user.user.id);
     r = await httpJson('/api/process', {

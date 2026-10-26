@@ -1,4 +1,4 @@
-// Trang Partner: theo dõi nhật ký canh tác của khách + trò chuyện 3 bên (user–admin–partner)
+// Trang Partner: nhật ký canh tác + 2 luồng chat riêng (với khách hàng và với admin)
 document.addEventListener('DOMContentLoaded', async () => {
   const me = await api('/me');
   if (!me.data || !me.data.success || me.data.user.role !== 'partner') {
@@ -19,13 +19,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   const tabButtons = [...tabs.querySelectorAll('.view-tab')];
   const chatTitle = document.getElementById('partnerChatTitle');
   const chatMeta = document.getElementById('partnerChatMeta');
+  const msgInput = document.getElementById('msgInput');
+  const sendBtn = document.getElementById('sendBtn');
+  const attachChip = document.getElementById('attachChip');
 
-  let selectedConvId = null;
-  let selectedUserId = null;
-  let activeView = 'process';
+  let selectedCustomer = null;
+  let activeView = 'process'; // 'process' | 'customer' | 'admin'
+  let activeConvId = null;
   let pendingFile = null;
   let processTimer = null;
   let socket = null;
+  const convOwners = new Map(); // convId → { userId, view } để định tuyến tin nhắn/số đếm
 
   const pager = createHistoryPager(
     messagesEl,
@@ -39,34 +43,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
-  function setView(view) {
-    activeView = view === 'chat' ? 'chat' : 'process';
-    for (const btn of tabButtons) {
-      const active = btn.dataset.view === activeView;
-      btn.classList.toggle('active', active);
-      btn.setAttribute('aria-selected', active ? 'true' : 'false');
-    }
-    processPane.hidden = activeView !== 'process';
-    chatPane.hidden = activeView !== 'chat';
-    if (activeView === 'chat') scrollBottom();
-    else loadProcess();
+  function tabFor(view) {
+    return tabButtons.find((btn) => btn.dataset.view === view);
   }
-  for (const btn of tabButtons) {
-    btn.addEventListener('click', () => setView(btn.dataset.view));
+
+  function markTabNew(view) {
+    if (view === activeView) return;
+    const tab = tabFor(view);
+    if (tab) tab.classList.add('has-new');
   }
-  document.getElementById('refreshProcessBtn').addEventListener('click', () => {
-    processTimeline.dataset.ready = '';
-    loadProcess();
-  });
 
   async function loadProcess() {
-    if (!selectedUserId) return;
-    const requestedUserId = selectedUserId;
+    if (!selectedCustomer) return;
+    const requestedUserId = selectedCustomer.user_id;
     if (!processTimeline.dataset.ready) {
       processTimeline.innerHTML = '<div class="process-loading">Đang tải nhật ký canh tác...</div>';
     }
     const { data } = await api(`/process?userId=${requestedUserId}`);
-    if (requestedUserId !== selectedUserId) return;
+    if (!selectedCustomer || requestedUserId !== selectedCustomer.user_id) return;
     if (data && data.success) {
       renderProcessTimeline(processTimeline, data.entries, {});
       processTimeline.dataset.ready = '1';
@@ -81,24 +75,49 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  async function openConversation(convId, userId, userName, itemEl) {
-    selectedConvId = convId;
-    selectedUserId = userId;
-    document.querySelectorAll('.partner-item').forEach((el) => el.classList.remove('active'));
-    if (itemEl) itemEl.classList.add('active');
-    chatTitle.textContent = userName;
-    chatMeta.textContent = 'Theo dõi quá trình canh tác và trao đổi trực tiếp';
-    noPartnerMsg.hidden = true;
-    tabs.hidden = false;
-    processPane.hidden = activeView !== 'process';
-    chatPane.hidden = activeView !== 'chat';
+  async function openChat(view) {
+    if (!selectedCustomer) return;
+    const convId = view === 'customer'
+      ? selectedCustomer.user_conversation_id
+      : selectedCustomer.admin_conversation_id;
+    if (!convId) return;
+    activeConvId = convId;
+    const tab = tabFor(view);
+    if (tab) tab.classList.remove('has-new');
+    msgInput.placeholder = view === 'customer'
+      ? `Nhắn riêng cho ${selectedCustomer.user_name}...`
+      : 'Nhắn riêng cho admin...';
     typingView.hide();
     pendingSends.clear();
-
     if (socket) socket.emit('join', { convId });
-    await Promise.all([loadProcess(), pager.open(convId)]);
-    if (activeView === 'chat') scrollBottom();
+    await pager.open(convId);
+    if (activeConvId === convId) scrollBottom();
   }
+
+  async function setView(view) {
+    const next = view === 'customer' || view === 'admin' ? view : 'process';
+    if (next !== 'process' && !selectedCustomer) return;
+    activeView = next;
+    for (const btn of tabButtons) {
+      const active = btn.dataset.view === activeView;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    }
+    processPane.hidden = activeView !== 'process';
+    chatPane.hidden = activeView === 'process';
+    if (activeView === 'process') {
+      await loadProcess();
+    } else {
+      await openChat(activeView);
+    }
+  }
+  for (const btn of tabButtons) {
+    btn.addEventListener('click', () => setView(btn.dataset.view));
+  }
+  document.getElementById('refreshProcessBtn').addEventListener('click', () => {
+    processTimeline.dataset.ready = '';
+    loadProcess();
+  });
 
   function updateItemCounts(userId, processDelta, messageDelta) {
     const item = listEl.querySelector(`.partner-item[data-user-id="${userId}"]`);
@@ -111,11 +130,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (meta) meta.textContent = `${processCount} nhật ký · ${messageCount} tin nhắn`;
   }
 
+  async function openCustomer(c, itemEl) {
+    selectedCustomer = c;
+    document.querySelectorAll('.partner-item').forEach((el) => el.classList.remove('active'));
+    if (itemEl) itemEl.classList.add('active');
+    chatTitle.textContent = c.user_name;
+    chatMeta.textContent = 'Nhật ký canh tác và trò chuyện riêng với khách hàng / admin';
+    noPartnerMsg.hidden = true;
+    tabs.hidden = false;
+    processPane.hidden = activeView !== 'process';
+    chatPane.hidden = activeView === 'process';
+    activeConvId = null;
+    typingView.hide();
+    pendingSends.clear();
+    processTimeline.dataset.ready = '';
+
+    // Join cả 2 phòng riêng để nhận tin realtime kể cả khi đang xem tab khác
+    if (socket) {
+      socket.emit('join', { convId: c.user_conversation_id });
+      socket.emit('join', { convId: c.admin_conversation_id });
+    }
+    if (activeView === 'process') await loadProcess();
+    else await openChat(activeView);
+  }
+
   // ===== Danh sách khách được gán =====
   const { data } = await api('/partner/conversations');
-  let firstItem = null;
+  let firstCustomer = null;
   if (data && data.success && data.conversations.length) {
     for (const c of data.conversations) {
+      convOwners.set(c.user_conversation_id, { userId: c.user_id, view: 'customer' });
+      convOwners.set(c.admin_conversation_id, { userId: c.user_id, view: 'admin' });
+
       const item = document.createElement('div');
       item.className = 'partner-item';
       item.dataset.userId = c.user_id;
@@ -133,45 +179,52 @@ document.addEventListener('DOMContentLoaded', async () => {
       info.append(name, meta);
 
       item.append(avatarEl(c.user_name, 'user'), info);
-      item.addEventListener('click', () => openConversation(c.conversation_id, c.user_id, c.user_name, item));
+      item.addEventListener('click', () => openCustomer(c, item));
       listEl.appendChild(item);
-      if (!firstItem) firstItem = { item, conv: c };
+      if (!firstCustomer) firstCustomer = { item, conv: c };
     }
     // Mở sẵn khách đầu tiên để màn hình không trống
-    await openConversation(firstItem.conv.conversation_id, firstItem.conv.user_id, firstItem.conv.user_name, firstItem.item);
+    await openCustomer(firstCustomer.conv, firstCustomer.item);
   }
 
   // ===== Socket =====
   socket = io({ path: '/ws', query: { sessionId: getSessionId() } });
-  const typing = createTypingSender(socket, () => selectedConvId);
+  const typing = createTypingSender(socket, () => activeConvId);
   wireConnectionIndicator(socket, document.getElementById('connDot'));
 
   socket.on('connect', () => {
-    if (selectedConvId) socket.emit('join', { convId: selectedConvId });
+    if (!selectedCustomer) return;
+    socket.emit('join', { convId: selectedCustomer.user_conversation_id });
+    socket.emit('join', { convId: selectedCustomer.admin_conversation_id });
   });
   socket.on('message', (msg) => {
-    if (msg.convId !== selectedConvId) return;
     const pending = msg.clientId && pendingSends.get(msg.clientId);
     if (pending) {
       pending.el.remove();
       pendingSends.delete(msg.clientId);
     }
-    typingView.hide();
-    messagesEl.appendChild(messageEl(msg, msg.senderId === myUser.id));
-    scrollBottom();
-    updateItemCounts(selectedUserId, 0, 1);
+    const owner = convOwners.get(msg.convId);
+    if (owner) updateItemCounts(owner.userId, 0, 1);
+
+    if (msg.convId === activeConvId) {
+      typingView.hide();
+      messagesEl.appendChild(messageEl(msg, msg.senderId === myUser.id));
+      scrollBottom();
+      return;
+    }
+    // Tin đến luồng còn lại của khách đang mở → chấm đỏ + toast, không xen vào khung chat
+    if (!owner || !selectedCustomer || owner.userId !== selectedCustomer.user_id) return;
+    markTabNew(owner.view);
+    if (msg.senderId !== myUser.id) toast(`Tin nhắn mới từ ${msg.senderName}`, 'info');
   });
   socket.on('typing', (d) => {
-    if (d.convId !== selectedConvId || d.userId === myUser.id) return;
+    if (activeView === 'process' || d.convId !== activeConvId || d.userId === myUser.id) return;
     if (d.isTyping) typingView.show();
     else typingView.hide();
   });
   socket.on('process-updated', (d) => {
-    if (d.userId !== selectedUserId) {
-      updateItemCounts(d.userId, d.action === 'created' ? 1 : -1, 0);
-      return;
-    }
     updateItemCounts(d.userId, d.action === 'created' ? 1 : -1, 0);
+    if (!selectedCustomer || d.userId !== selectedCustomer.user_id) return;
     clearTimeout(processTimer);
     processTimer = setTimeout(loadProcess, 250);
     if (d.action === 'created' && activeView !== 'process') {
@@ -184,9 +237,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // ===== Gửi tin + đính kèm =====
-  const msgInput = document.getElementById('msgInput');
-  const sendBtn = document.getElementById('sendBtn');
-  const attachChip = document.getElementById('attachChip');
   wireAttachButton('attachBtn', 'attachInput', 'attachChip', (res) => { pendingFile = res; });
 
   function failAllPending() {
@@ -202,7 +252,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function sendMessage() {
-    if (!selectedConvId) return;
+    if (activeView === 'process' || !activeConvId) return;
     const content = msgInput.value.trim();
     if (!content && !pendingFile) return;
     if (!socket.connected) {
@@ -226,7 +276,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     scrollBottom();
     pendingSends.set(clientId, { el, content, file: pendingFile });
 
-    socket.emit('message', { convId: selectedConvId, ...draft, clientId });
+    socket.emit('message', { convId: activeConvId, ...draft, clientId });
     msgInput.value = '';
     typing.stop();
     pendingFile = null;

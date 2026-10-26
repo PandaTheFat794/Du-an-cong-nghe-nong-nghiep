@@ -6,7 +6,7 @@ const session = require('express-session');
 const { Server } = require('socket.io');
 
 const { store, getSessionUser } = require('./session-store');
-const { getConversation, insertMessage, countUnread, markAsRead } = require('./db');
+const { getConversation, insertMessage, countUnread, countPartnerUnread, markAsRead, canAccessConversation } = require('./db');
 const authRoutes = require('./routes/auth');
 const chatRoutes = require('./routes/chat');
 const adminRoutes = require('./routes/admin');
@@ -92,7 +92,8 @@ setInterval(() => {
 //   client → server: 'join' {convId}, 'message' {convId, content, attachment?, clientId?},
 //                     'read' {convId}, 'typing' {convId, isTyping}
 //   server → client: 'joined', 'message', 'unread-badge', 'badge-cleared',
-//                     'user-message' (room admins, kèm senderRole), 'typing',
+//                     'user-message' (room admins), 'partner-message'/'partner-badge'/
+//                     'partner-badge-cleared' (room admins), 'typing',
 //                     'process-updated' {userId, userName, convId, action, entryId}, 'error'
 io.on('connection', (socket) => {
   const user = socket.user;
@@ -104,15 +105,19 @@ io.on('connection', (socket) => {
     const conversation = getConversation(Number(convId));
     if (!conversation) return socket.emit('error', { message: 'Conversation không tồn tại.' });
 
-    const isAdmin = user.role === 'admin';
-    const isOwner = conversation.user_id === user.id;
-    const isAssignedPartner = conversation.partner_id === user.id;
-
-    if (isAdmin || isOwner || isAssignedPartner) {
+    if (canAccessConversation(user, conversation)) {
       socket.join(`conv_${conversation.id}`);
       socket.emit('joined', { convId: conversation.id, success: true, role: user.role });
-      if (isAdmin) {
-        socket.emit('unread-badge', { convId: conversation.id, count: countUnread(conversation.id) });
+      if (user.role === 'admin') {
+        if (conversation.kind === 'partner_admin') {
+          socket.emit('partner-badge', {
+            convId: conversation.id,
+            userId: conversation.user_id,
+            count: countPartnerUnread(conversation.id),
+          });
+        } else {
+          socket.emit('unread-badge', { convId: conversation.id, count: countUnread(conversation.id) });
+        }
       }
     } else {
       socket.emit('error', { message: 'Bạn không có quyền tham gia conversation này.' });
@@ -125,12 +130,9 @@ io.on('connection', (socket) => {
     const conversation = getConversation(Number(convId));
     if (!conversation) return socket.emit('error', { message: 'Conversation không tồn tại.' });
 
-    // Chủ cuộc trò chuyện (user), admin, hoặc partner đã được gán đều gửi được tin.
-    // Cả 3 cùng nói chuyện trong một luồng để partner tư vấn chung với admin.
-    const isOwner = conversation.user_id === user.id;
-    const isAdmin = user.role === 'admin';
-    const isAssignedPartner = user.role === 'partner' && conversation.partner_id === user.id;
-    if (!isOwner && !isAdmin && !isAssignedPartner) {
+    // Mỗi thread chỉ đúng 2 bên: user_admin (khách+admin), partner_user (khách+partner),
+    // partner_admin (partner+admin). Partner không đọc/gửi được thread của admin và khách.
+    if (!canAccessConversation(user, conversation)) {
       return socket.emit('error', { message: 'Bạn không có quyền gửi tin nhắn vào conversation này.' });
     }
     if (isFlooding(user.id)) {
@@ -161,25 +163,53 @@ io.on('connection', (socket) => {
 
     io.to(`conv_${conversation.id}`).emit('message', payload);
 
-    // Người khác admin gửi tin (khách hoặc partner) → refresh sidebar admin.
-    // Badge unread chỉ đếm tin của chính khách hàng (countUnread), partner không làm tăng badge.
-    if (!isAdmin) {
-      const unread = countUnread(conversation.id);
+    const preview = row.content || `[đính kèm: ${row.attachment_name || 'tệp'}]`;
+
+    // Khách gửi trong thread với admin → badge đỏ + preview cho sidebar admin.
+    // Tin partner trong thread partner_admin → badge amber riêng, không lẫn vào chat khách.
+    // Thread partner_user là riêng tư, admin không nhận thông báo nội dung.
+    if (conversation.kind === 'user_admin' && user.role === 'user') {
       io.to('admins').emit('user-message', {
         convId: conversation.id,
-        senderRole: user.role,
-        preview: row.content || `[đính kèm: ${row.attachment_name || 'tệp'}]`,
+        userId: conversation.user_id,
+        preview,
         createdAt: row.created_at,
       });
-      io.to('admins').emit('unread-badge', { convId: conversation.id, count: unread });
+      io.to('admins').emit('unread-badge', {
+        convId: conversation.id,
+        count: countUnread(conversation.id),
+      });
+    } else if (conversation.kind === 'partner_admin' && user.role === 'partner') {
+      io.to('admins').emit('partner-message', {
+        convId: conversation.id,
+        userId: conversation.user_id,
+        userName: conversation.user_name,
+        partnerName: user.display_name,
+        preview,
+        createdAt: row.created_at,
+      });
+      io.to('admins').emit('partner-badge', {
+        convId: conversation.id,
+        userId: conversation.user_id,
+        count: countPartnerUnread(conversation.id),
+      });
     }
   });
 
-  // Admin mở cuộc trò chuyện → đánh dấu đã đọc, xoá badge
+  // Admin mở một thread → đánh dấu đã đọc, xoá badge tương ứng
   socket.on('read', ({ convId }) => {
     if (!user || user.role !== 'admin') return;
-    markAsRead(Number(convId));
-    io.to('admins').emit('badge-cleared', { convId: Number(convId) });
+    const conversation = getConversation(Number(convId));
+    if (!conversation || !canAccessConversation(user, conversation)) return;
+    markAsRead(conversation.id);
+    if (conversation.kind === 'partner_admin') {
+      io.to('admins').emit('partner-badge-cleared', {
+        convId: conversation.id,
+        userId: conversation.user_id,
+      });
+    } else {
+      io.to('admins').emit('badge-cleared', { convId: conversation.id });
+    }
   });
 
   // Typing indicator: relay tới những người khác trong phòng (socket.to tự loại sender).

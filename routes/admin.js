@@ -1,17 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const { requireAuth, requireRole } = require('../auth');
-const { db } = require('../db');
+const { db, ensurePartnerThreads } = require('../db');
 
 /**
  * GET /api/admin/users
- * Danh sách khách hàng (role='user') kèm tin cuối + số tin chưa đọc, cho sidebar Admin.
+ * Danh sách khách hàng (role='user') kèm tin cuối + số tin chưa đọc của khách
+ * và số tin partner chưa đọc trong thread partner_admin, cho sidebar Admin.
  * Một truy vấn duy nhất (trước đây 3 query / mỗi user).
  */
 router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
   const rows = db.prepare(
     `SELECT u.id, u.username, u.display_name, u.role, u.created_at,
             c.id AS conversation_id,
+            c.partner_id AS partner_id,
+            p.display_name AS partner_name,
             lm.content AS last_content,
             lm.attachment_name AS last_attachment_name,
             lm.created_at AS last_message_time,
@@ -19,11 +22,21 @@ router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
               SELECT COUNT(*) FROM messages m
               WHERE m.conversation_id = c.id AND m.id > c.admin_last_read_id AND m.sender_id = c.user_id
             ), 0) AS unread_count,
+            (SELECT pc.id FROM conversations pc
+              WHERE pc.kind = 'partner_admin' AND pc.user_id = u.id AND pc.partner_id = c.partner_id
+            ) AS partner_conversation_id,
+            COALESCE((
+              SELECT COUNT(*) FROM messages m
+              JOIN conversations pc ON pc.id = m.conversation_id
+              WHERE pc.kind = 'partner_admin' AND pc.user_id = u.id AND pc.partner_id = c.partner_id
+                AND m.id > pc.admin_last_read_id AND m.sender_id = pc.partner_id
+            ), 0) AS partner_unread,
             COALESCE((
               SELECT COUNT(*) FROM process_entries pe WHERE pe.user_id = u.id
             ), 0) AS process_count
      FROM users u
-     LEFT JOIN conversations c ON c.user_id = u.id
+     LEFT JOIN conversations c ON c.user_id = u.id AND c.kind = 'user_admin'
+     LEFT JOIN users p ON p.id = c.partner_id
      LEFT JOIN messages lm ON lm.id = (SELECT MAX(m2.id) FROM messages m2 WHERE m2.conversation_id = c.id)
      WHERE u.role = 'user'
      ORDER BY u.created_at DESC`
@@ -35,6 +48,10 @@ router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
     display_name: u.display_name,
     role: u.role,
     conversation_id: u.conversation_id,
+    partner_id: u.partner_id,
+    partner_name: u.partner_name,
+    partner_conversation_id: u.partner_conversation_id,
+    partner_unread: u.partner_unread,
     last_message: u.last_message_time
       ? (u.last_content || `[đính kèm: ${u.last_attachment_name || 'tệp'}]`)
       : 'Chưa có tin nhắn',
@@ -68,7 +85,9 @@ router.post('/conversations/:convId/connect', requireAuth, requireRole('admin'),
     return res.status(400).json({ error: 'Thiếu partner_id hợp lệ' });
   }
 
-  const conversation = db.prepare('SELECT id FROM conversations WHERE id = ?').get(convId);
+  const conversation = db
+    .prepare("SELECT * FROM conversations WHERE id = ? AND kind = 'user_admin'")
+    .get(convId);
   if (!conversation) {
     return res.status(404).json({ error: 'Conversation không tồn tại' });
   }
@@ -79,7 +98,15 @@ router.post('/conversations/:convId/connect', requireAuth, requireRole('admin'),
   }
 
   db.prepare('UPDATE conversations SET partner_id = ? WHERE id = ?').run(partner_id, convId);
-  res.json({ success: true, conversationId: convId, partnerId: Number(partner_id) });
+  // Tạo sẵn 2 thread riêng tư: partner↔khách và partner↔admin
+  const { userThread, adminThread } = ensurePartnerThreads(conversation.user_id, partner.id);
+  res.json({
+    success: true,
+    conversationId: convId,
+    partnerId: Number(partner_id),
+    partnerConversationId: adminThread.id,
+    partnerUserConversationId: userThread.id,
+  });
 });
 
 /**

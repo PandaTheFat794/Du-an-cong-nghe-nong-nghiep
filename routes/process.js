@@ -38,8 +38,9 @@ function canViewProcess(user, targetUserId) {
   if (user.role === 'admin') return true;
   if (user.role === 'user') return user.id === targetUserId;
   if (user.role === 'partner') {
+    // Chỉ partner đang được gán trong thread user_admin của khách mới xem được nhật ký
     const conv = db
-      .prepare('SELECT id FROM conversations WHERE user_id = ? AND partner_id = ?')
+      .prepare("SELECT id FROM conversations WHERE kind = 'user_admin' AND user_id = ? AND partner_id = ?")
       .get(targetUserId, user.id);
     return !!conv;
   }
@@ -61,6 +62,16 @@ function broadcastProcessUpdate(req, userId, action, entryId) {
   };
   io.to('admins').emit('process-updated', payload);
   io.to(`conv_${conversation.id}`).emit('process-updated', payload);
+  // Partner đang được gán theo dõi nhật ký qua thread partner_user (join cả 2 thread
+  // riêng nhưng chỉ nhận 1 bản tin để không toast trùng).
+  if (conversation.partner_id) {
+    const partnerThread = db
+      .prepare(
+        "SELECT id FROM conversations WHERE kind = 'partner_user' AND user_id = ? AND partner_id = ?"
+      )
+      .get(userId, conversation.partner_id);
+    if (partnerThread) io.to(`conv_${partnerThread.id}`).emit('process-updated', payload);
+  }
 }
 
 function parseTargetUser(value) {

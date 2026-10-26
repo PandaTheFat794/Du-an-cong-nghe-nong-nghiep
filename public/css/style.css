@@ -240,6 +240,11 @@ body {
   animation: badgePop var(--dur) var(--ease-spring);
 }
 .user-unread[hidden] { display: none; }
+.user-unread.partner {
+  background: linear-gradient(135deg, #fbbf24, #d97706);
+  box-shadow: 0 2px 8px rgba(217, 119, 6, 0.4);
+  margin-left: 3px;
+}
 @keyframes badgePop { from { transform: scale(0); } 60% { transform: scale(1.25); } to { transform: scale(1); } }
 
 .user-delete {
@@ -263,10 +268,10 @@ body {
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
   display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;
-  position: relative;
+  position: relative; flex-wrap: wrap; z-index: 10;
 }
-.chat-header h2 { font-size: 1.02rem; display: flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em; }
-.chat-controls { display: flex; gap: 0.5rem; align-items: center; position: relative; }
+.chat-header h2 { font-size: 1.02rem; display: flex; align-items: center; gap: 0.5rem; letter-spacing: -0.01em; min-width: 0; }
+.chat-controls { display: flex; gap: 0.5rem; align-items: center; position: relative; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
 
 .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex-shrink: 0; }
 .status-dot.online { background: #22c55e; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); animation: pulse 2s infinite; }
@@ -287,15 +292,9 @@ body {
 .chat-btn:hover { background: var(--primary-faint); border-color: var(--primary); transform: translateY(-1px); }
 .chat-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 
-.partner-chip {
-  font-size: 0.75rem; font-weight: 600; color: #92400e;
-  background: var(--accent-soft); border: 1px solid #fde68a;
-  padding: 0.25rem 0.65rem; border-radius: 20px;
-  display: inline-flex; align-items: center; gap: 0.35rem;
-  animation: fadeSlide var(--dur-slow);
-}
-.partner-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
-.partner-chip[hidden] { display: none; }
+/* Tabs chuyển giữa các luồng chat riêng trên header */
+.header-tabs { flex-wrap: wrap; animation: fadeSlide var(--dur-slow); }
+.header-tabs .view-tab { max-width: 190px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 .partner-select {
   padding: 0.38rem 0.55rem; border: 1.5px solid var(--border); border-radius: 10px;
@@ -484,6 +483,8 @@ body {
 .toast-info { border-left-color: var(--info); }
 /* Drawer nhật ký mở → đẩy toast sang vùng chat để không che header drawer */
 body.drawer-open .toast-stack { right: calc(min(470px, 100%) + 1.1rem); }
+/* Trên trang partner, hạ toast xuống dưới topbar để không che tab chuyển chế độ xem */
+.page-partner .toast-stack { top: 5rem; }
 
 /* ============================== PARTNER VIEW ============================== */
 .partner-sidebar {
@@ -593,6 +594,7 @@ body.drawer-open .toast-stack { right: calc(min(470px, 100%) + 1.1rem); }
 }
 .view-tabs[hidden] { display: none; }
 .view-tab {
+  position: relative;
   display: inline-flex; align-items: center; gap: 0.35rem;
   border: none; background: transparent; color: var(--muted);
   font-family: inherit; font-size: 0.78rem; font-weight: 600;
@@ -602,6 +604,16 @@ body.drawer-open .toast-stack { right: calc(min(470px, 100%) + 1.1rem); }
 .view-tab svg { width: 15px; height: 15px; }
 .view-tab:hover { color: var(--primary-dark); background: rgba(255, 255, 255, 0.7); }
 .view-tab.active { background: var(--surface); color: var(--primary-dark); box-shadow: var(--shadow-sm); }
+.view-tab[hidden] { display: none; }
+/* Chấm báo có tin mới ở luồng chat khác */
+.view-tab.has-new::after {
+  content: "";
+  position: absolute; top: 5px; right: 6px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--surface);
+  animation: badgePop var(--dur) var(--ease-spring);
+}
 
 .partner-stage {
   flex: 1; min-height: 0; position: relative;
@@ -883,8 +895,11 @@ body.drawer-open .toast-stack { right: calc(min(470px, 100%) + 1.1rem); }
   .admin-sidebar, .partner-sidebar { width: 100%; height: auto; max-height: 42vh; border-right: none; border-bottom: 1px solid var(--border); }
   .message, .partner-message { max-width: 88%; }
   .partner-topbar { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+  .page-partner .toast-stack { top: 8.4rem; }
   .view-tabs { justify-content: center; }
   .view-tab { flex: 1; justify-content: center; }
+  .chat-header .header-tabs { width: 100%; order: 3; }
+  .chat-header .header-tabs .view-tab { flex: 1; }
   .partner-stage { padding: 0.6rem; }
   .process-list { padding-left: 1.9rem; }
   .process-marker { left: -1.95rem; width: 1.75rem; height: 1.75rem; font-size: 13px; }

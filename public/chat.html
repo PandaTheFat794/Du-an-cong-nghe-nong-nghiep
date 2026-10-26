@@ -14,9 +14,12 @@
   <div id="root">
     <div class="chat-area">
       <div class="chat-header">
-        <h2><span class="status-dot" id="connDot"></span>Chuyên gia tư vấn</h2>
+        <h2><span class="status-dot" id="connDot"></span><span id="chatTitle">Chuyên gia tư vấn</span></h2>
         <div class="chat-controls" id="headerControls">
-          <span class="partner-chip" id="partnerChip" hidden></span>
+          <div class="view-tabs header-tabs" id="threadTabs" role="tablist" aria-label="Cuộc trò chuyện riêng" hidden>
+            <button class="view-tab active" data-thread="admin" role="tab" aria-selected="true" type="button">Chuyên gia</button>
+            <button class="view-tab" data-thread="partner" role="tab" aria-selected="false" type="button" hidden></button>
+          </div>
           <button class="chat-btn" id="processBtn" type="button">Nhật ký</button>
           <button class="chat-btn" id="logoutBtn" type="button">Đăng xuất</button>
         </div>
