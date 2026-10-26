@@ -17,6 +17,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const partnerSelect = document.getElementById('partnerSelect');
   const connectPartnerBtn = document.getElementById('connectPartnerBtn');
 
+  const pager = createHistoryPager(
+    messagesArea,
+    document.getElementById('loadMoreBtn'),
+    (msg) => messageEl(msg, msg.senderRole === 'admin')
+  );
+
   let selectedConvId = null;
   let partners = [];
   let pendingFile = null;
@@ -97,6 +103,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     selectedConvId = null;
     typingView.hide();
     pendingSends.clear();
+    pager.reset();
     chatTitle.textContent = 'Chọn một khách hàng để tư vấn';
     [msgInput, sendBtn, attachBtn].forEach((el) => { el.disabled = true; });
     partnerSelect.hidden = true;
@@ -132,12 +139,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     socket.emit('join', { convId });
 
-    const { data } = await api(`/conversations/${convId}/messages`);
-    messagesArea.innerHTML = '';
-    if (data && data.success) {
-      for (const msg of data.messages) {
-        messagesArea.appendChild(messageEl(msg, msg.senderRole === 'admin'));
-      }
+    const data = await pager.open(convId);
+    if (data) {
       scrollBottom();
       renderPartnerControl(data.conversation.partner_id, data.conversation.partner_name);
     }

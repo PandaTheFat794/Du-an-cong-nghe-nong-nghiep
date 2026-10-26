@@ -14,15 +14,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   const convId = me.data.conversation_id;
   wireLogout('logoutBtn');
 
-  // 2. Lịch sử tin nhắn (REST)
-  const history = await api(`/conversations/${convId}/messages`);
-  if (history.data && history.data.success) {
-    for (const msg of history.data.messages) {
-      messagesArea.appendChild(messageEl(msg, msg.senderRole === 'user'));
-    }
-    if (history.data.conversation.partner_name) {
+  // 2. Lịch sử tin nhắn (REST, phân trang: nút "Tải tin cũ hơn" khi còn)
+  const pager = createHistoryPager(
+    messagesArea,
+    document.getElementById('loadMoreBtn'),
+    (msg) => messageEl(msg, msg.senderRole === 'user')
+  );
+  const history = await pager.open(convId);
+  if (history) {
+    if (history.conversation.partner_name) {
       const chip = document.getElementById('partnerChip');
-      chip.textContent = `Đồng hành: ${history.data.conversation.partner_name}`;
+      chip.textContent = `Đồng hành: ${history.conversation.partner_name}`;
       chip.hidden = false;
     }
     scrollBottom();

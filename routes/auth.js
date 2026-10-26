@@ -2,22 +2,59 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const auth = require('../auth');
+const { createRateLimiter } = require('../rate-limit');
 const { db, getUserByUsername, getOrCreateConversation } = require('../db');
 
-// POST /api/register: khách hàng tự đăng ký tài khoản (role='user')
-router.post('/register', (req, res) => {
-  const { username, password, display_name } = req.body || {};
-  if (!username || !password || !display_name) {
-    return res.status(400).json({ error: 'Thiếu username, password hoặc display_name' });
+const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,32}$/;
+const PASSWORD_MIN = 6;
+const PASSWORD_MAX = 72; // bcrypt chỉ dùng tối đa 72 byte
+const DISPLAY_NAME_MAX = 60;
+
+function validateRegistration({ username, password, display_name }) {
+  if (typeof username !== 'string' || typeof password !== 'string' || typeof display_name !== 'string') {
+    return 'Thiếu username, password hoặc display_name';
   }
+  if (!USERNAME_RE.test(username.trim())) {
+    return 'Username phải dài 3–32 ký tự, chỉ gồm chữ, số, dấu chấm, gạch dưới hoặc gạch ngang';
+  }
+  if (password.length < PASSWORD_MIN || password.length > PASSWORD_MAX) {
+    return `Mật khẩu phải dài ${PASSWORD_MIN}–${PASSWORD_MAX} ký tự`;
+  }
+  const name = display_name.trim();
+  if (!name || name.length > DISPLAY_NAME_MAX) {
+    return `Tên hiển thị phải dài 1–${DISPLAY_NAME_MAX} ký tự`;
+  }
+  return null;
+}
+
+const loginLimiter = createRateLimiter({
+  windowMs: 5 * 60 * 1000,
+  max: 20,
+  message: 'Bạn thử đăng nhập quá nhiều lần, vui lòng đợi vài phút.',
+});
+const registerLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  message: 'Bạn đã tạo quá nhiều tài khoản, vui lòng thử lại sau.',
+});
+
+// POST /api/register: khách hàng tự đăng ký tài khoản (role='user')
+router.post('/register', registerLimiter, (req, res) => {
+  const { username, password, display_name } = req.body || {};
+  const invalid = validateRegistration({ username, password, display_name });
+  if (invalid) {
+    return res.status(400).json({ error: invalid });
+  }
+  const uname = username.trim();
+  const displayName = display_name.trim();
   try {
-    if (getUserByUsername(username)) {
+    if (getUserByUsername(uname)) {
       return res.status(409).json({ error: 'Tên đăng nhập đã tồn tại' });
     }
     const passwordHash = bcrypt.hashSync(password, 10);
     const info = db.prepare(
       'INSERT INTO users (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)'
-    ).run(username, passwordHash, display_name, 'user');
+    ).run(uname, passwordHash, displayName, 'user');
     // Mỗi user tự động có 1 conversation 1-1 với admin
     db.prepare('INSERT INTO conversations (user_id) VALUES (?)').run(info.lastInsertRowid);
     res.status(201).json({ success: true, userId: Number(info.lastInsertRowid) });
@@ -27,7 +64,7 @@ router.post('/register', (req, res) => {
   }
 });
 
-router.post('/login', auth.login);
+router.post('/login', loginLimiter, auth.login);
 router.post('/logout', auth.logout);
 
 // GET /api/me: user hiện tại; role 'user' được kèm conversation_id để vào trang chat

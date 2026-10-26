@@ -10,6 +10,9 @@ const db = new Database(DB_PATH, {
   verbose: process.env.DB_DEBUG ? console.log : undefined,
 });
 
+// WAL: đọc không chặn ghi khi nhiều client chat realtime; busy_timeout chờ thay vì lỗi SQLITE_BUSY
+db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
 // Bật ràng buộc khóa ngoại để DELETE user tự cascade sang conversations/messages
 db.pragma('foreign_keys = ON');
 
@@ -70,6 +73,9 @@ db.exec(`
   );
 `);
 
+// Index phủ truy vấn lịch sử + phân trang (WHERE conversation_id = ? AND id </> ?)
+db.exec('CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id, id);');
+
 // Seed tài khoản mặc định nếu DB rỗng (chạy 1 lần đầu)
 const existingAdmin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
 if (!existingAdmin) {
@@ -99,12 +105,19 @@ const statements = {
   getUserByUsername: db.prepare('SELECT * FROM users WHERE username = ?'),
   getConversationByUserId: db.prepare('SELECT * FROM conversations WHERE user_id = ?'),
   insertConversation: db.prepare('INSERT INTO conversations (user_id) VALUES (?)'),
-  getMessages: db.prepare(
+  getMessagesLatest: db.prepare(
     `SELECT m.id, m.sender_id AS senderId, m.content, m.attachment_url AS attachmentUrl,
             m.attachment_name AS attachmentName, m.created_at AS createdAt,
             u.display_name AS senderName, u.role AS senderRole
      FROM messages m JOIN users u ON m.sender_id = u.id
-     WHERE m.conversation_id = ? ORDER BY m.id ASC`
+     WHERE m.conversation_id = ? ORDER BY m.id DESC LIMIT ?`
+  ),
+  getMessagesBefore: db.prepare(
+    `SELECT m.id, m.sender_id AS senderId, m.content, m.attachment_url AS attachmentUrl,
+            m.attachment_name AS attachmentName, m.created_at AS createdAt,
+            u.display_name AS senderName, u.role AS senderRole
+     FROM messages m JOIN users u ON m.sender_id = u.id
+     WHERE m.conversation_id = ? AND m.id < ? ORDER BY m.id DESC LIMIT ?`
   ),
   getMessageById: db.prepare('SELECT * FROM messages WHERE id = ?'),
   insertMessage: db.prepare(
@@ -147,7 +160,15 @@ module.exports = {
       return statements.getConversationByUserId.get(info.lastInsertRowid);
     })(),
 
-  getMessages: (convId) => statements.getMessages.all(convId),
+  // Một trang lịch sử (mới nhất trước khi đảo): lấy limit+1 để biết còn tin cũ hơn không.
+  // beforeId = null → trang mới nhất; ngược lại → các tin có id < beforeId.
+  getMessagesPage: (convId, beforeId, limit) => {
+    const rows = beforeId
+      ? statements.getMessagesBefore.all(convId, beforeId, limit + 1)
+      : statements.getMessagesLatest.all(convId, limit + 1);
+    const hasMore = rows.length > limit;
+    return { messages: rows.slice(0, limit).reverse(), has_more: hasMore };
+  },
 
   // chèn tin (kèm file đính kèm optional), trả về row đã lưu
   insertMessage: (convId, senderId, content, attachmentUrl = null, attachmentName = null) => {

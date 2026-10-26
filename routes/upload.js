@@ -4,8 +4,16 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const { requireAuth } = require('../auth');
+const { createRateLimiter } = require('../rate-limit');
 
 const router = express.Router();
+
+const uploadLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 30,
+  keyFn: (req) => req.user.id,
+  message: 'Bạn tải file quá nhiều lần, vui lòng thử lại sau.',
+});
 
 const UPLOAD_DIR = path.join(__dirname, '..', 'public', 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -41,7 +49,7 @@ function hasValidSignature(buf, ext) {
 }
 
 // POST /api/upload (multipart/form-data, field "file") → { url, name }
-router.post('/upload', requireAuth, (req, res) => {
+router.post('/upload', requireAuth, uploadLimiter, (req, res) => {
   upload.single('file')(req, res, (err) => {
     if (err) {
       const msg = err.code === 'LIMIT_FILE_SIZE'

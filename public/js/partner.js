@@ -14,6 +14,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   let selectedConvId = null;
 
+  const pager = createHistoryPager(
+    messagesEl,
+    document.getElementById('loadMoreBtn'),
+    (msg) => messageEl(msg, false, 'partner-message')
+  );
+
   const { data } = await api('/partner/conversations');
   if (!data || !data.success || !data.conversations.length) return;
   noPartnerMsg.remove();
@@ -34,14 +40,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     itemEl.classList.add('active');
     socket.emit('join', { convId });
 
-    const { data } = await api(`/conversations/${convId}/messages`);
-    messagesEl.innerHTML = '';
-    if (data && data.success) {
-      for (const msg of data.messages) {
-        messagesEl.appendChild(messageEl(msg, false, 'partner-message'));
-      }
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-    }
+    const data = await pager.open(convId);
+    if (data) messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
   // Partner được join room để xem tin mới realtime (không gửi được - server chặn)

@@ -121,6 +121,14 @@ async function main() {
   r = await httpJson('/api/register', { method: 'POST', body: { username: uname, password: 'pass123', display_name: 'Dup' } });
   check('register trùng tên → 409', r.status === 409, `status ${r.status}`);
 
+  // 🔍 validation đăng ký
+  r = await httpJson('/api/register', { method: 'POST', body: { username: 'ab', password: 'pass123', display_name: 'Short' } });
+  check('🔍 register username <3 ký tự → 400', r.status === 400, `status ${r.status}`);
+  r = await httpJson('/api/register', { method: 'POST', body: { username: 'bad name!', password: 'pass123', display_name: 'Bad' } });
+  check('🔍 register username chứa ký tự lạ → 400', r.status === 400, `status ${r.status}`);
+  r = await httpJson('/api/register', { method: 'POST', body: { username: uname + '_x', password: '12345', display_name: 'Short pw' } });
+  check('🔍 register password <6 ký tự → 400', r.status === 400, `status ${r.status}`);
+
   r = await httpJson('/api/login', { method: 'POST', body: { username: uname, password: 'wrong' } });
   check('login sai mật khẩu → 401', r.status === 401, `status ${r.status}`);
 
@@ -241,6 +249,20 @@ async function main() {
     r = await httpJson(`/api/conversations/${convId}/messages`, { cookie: user.cookie });
     const contents = (r.data.messages || []).map((m) => m.content);
     check('REST history chứa cả 2 tin đã gửi', contents.includes('Xin chào Admin') && contents.includes('Admin trả lời đây'), JSON.stringify(contents));
+
+    // 🔍 phân trang lịch sử: limit + before
+    r = await httpJson(`/api/conversations/${convId}/messages?limit=2`, { cookie: user.cookie });
+    const page1 = r.data.messages || [];
+    check('🔍 phân trang: limit=2 trả 2 tin mới nhất + has_more',
+      page1.length === 2 && r.data.has_more === true && page1[1].content === 'có clientId',
+      JSON.stringify({ count: page1.length, hasMore: r.data.has_more, last: page1[1] && page1[1].content }));
+    r = await httpJson(`/api/conversations/${convId}/messages?limit=2&before=${page1[0].id}`, { cookie: user.cookie });
+    const page2 = r.data.messages || [];
+    check('🔍 phân trang: before=<id> trả trang cũ hơn, hết tin → has_more=false',
+      page2.length === 2 && page2.every((m) => m.id < page1[0].id) && r.data.has_more === false,
+      JSON.stringify({ count: page2.length, hasMore: r.data.has_more }));
+    r = await httpJson(`/api/conversations/${convId}/messages?limit=abc`, { cookie: user.cookie });
+    check('🔍 phân trang: limit không hợp lệ → dùng mặc định (200)', r.status === 200 && r.data.messages.length === 4, `status ${r.status}, count ${r.data.messages && r.data.messages.length}`);
   } finally {
     userSock.close();
     adminSock.close();
@@ -374,6 +396,14 @@ async function main() {
   } finally {
     reSock.close();
   }
+
+  // ===== 8. Rate-limit login (bộ đếm trong bộ nhớ đã reset sau restart ở bước 7) =====
+  let lastStatus = 0;
+  for (let i = 0; i < 21; i += 1) {
+    r = await httpJson('/api/login', { method: 'POST', body: { username: 'admin', password: 'sai-mat-khau' } });
+    lastStatus = r.status;
+  }
+  check('🔍 rate-limit login: quá 20 lần / 5 phút → 429', lastStatus === 429, `status lần cuối ${lastStatus}`);
 
   server.kill();
   console.log(`\n📊 Kết quả: ${passed} pass / ${failed} fail (tổng ${passed + failed})`);

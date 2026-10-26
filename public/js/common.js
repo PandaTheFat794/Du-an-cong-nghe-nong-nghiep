@@ -106,6 +106,75 @@ function wireLogout(buttonId) {
   if (btn) btn.addEventListener('click', logout);
 }
 
+/**
+ * Phân trang lịch sử chat: trang đầu là tin mới nhất; nút "Tải tin cũ hơn"
+ * nạp thêm một trang cũ hơn và giữ nguyên vị trí người dùng đang đọc.
+ * - area: khung chứa tin, button: nút tải thêm (hidden khi hết tin)
+ * - render(msg): trả về element của một tin
+ */
+function createHistoryPager(area, button, render) {
+  const PAGE_SIZE = 50;
+  let convId = null;
+  let oldestId = null;
+  let hasMore = false;
+  let loading = false;
+
+  function syncButton() {
+    if (button) button.hidden = !hasMore;
+  }
+
+  function applyPage(data, prepend) {
+    const prevHeight = area.scrollHeight;
+    const frag = document.createDocumentFragment();
+    for (const msg of data.messages) frag.appendChild(render(msg));
+    if (prepend) {
+      area.insertBefore(frag, area.firstChild);
+      // Bù scroll để nội dung đang đọc không bị nhảy khi chèn trang cũ lên đầu
+      area.scrollTop += area.scrollHeight - prevHeight;
+    } else {
+      area.appendChild(frag);
+    }
+    hasMore = !!data.has_more;
+    if (data.messages.length) oldestId = data.messages[0].id;
+    syncButton();
+  }
+
+  async function loadMore() {
+    if (!convId || !hasMore || loading) return;
+    loading = true;
+    const requestedConv = convId;
+    if (button) button.disabled = true;
+    const { data } = await api(`/conversations/${requestedConv}/messages?before=${oldestId}&limit=${PAGE_SIZE}`);
+    loading = false;
+    if (button) button.disabled = false;
+    // Bỏ qua nếu người dùng đã chuyển sang conversation khác trong lúc chờ
+    if (requestedConv === convId && data && data.success) applyPage(data, true);
+  }
+
+  if (button) button.addEventListener('click', loadMore);
+
+  return {
+    async open(id) {
+      convId = id;
+      oldestId = null;
+      hasMore = false;
+      syncButton();
+      area.innerHTML = '';
+      const { data } = await api(`/conversations/${id}/messages?limit=${PAGE_SIZE}`);
+      if (convId !== id || !data || !data.success) return null;
+      applyPage(data, false);
+      return data;
+    },
+    reset() {
+      convId = null;
+      oldestId = null;
+      hasMore = false;
+      syncButton();
+    },
+    loadMore,
+  };
+}
+
 // ===== Toast: thông báo nổi ở góc phải (thay cho alert/flash text) =====
 function toast(message, type = 'info', duration = 3500) {
   let stack = document.querySelector('.toast-stack');

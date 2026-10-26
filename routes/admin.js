@@ -6,48 +6,40 @@ const { db } = require('../db');
 /**
  * GET /api/admin/users
  * Danh sách khách hàng (role='user') kèm tin cuối + số tin chưa đọc, cho sidebar Admin.
+ * Một truy vấn duy nhất (trước đây 3 query / mỗi user).
  */
 router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
-  const users = db.prepare(
-    `SELECT id, username, display_name, role, created_at FROM users WHERE role = 'user' ORDER BY created_at DESC`
+  const rows = db.prepare(
+    `SELECT u.id, u.username, u.display_name, u.role, u.created_at,
+            c.id AS conversation_id,
+            lm.content AS last_content,
+            lm.attachment_name AS last_attachment_name,
+            lm.created_at AS last_message_time,
+            COALESCE((
+              SELECT COUNT(*) FROM messages m
+              WHERE m.conversation_id = c.id AND m.id > c.admin_last_read_id AND m.sender_id = c.user_id
+            ), 0) AS unread_count
+     FROM users u
+     LEFT JOIN conversations c ON c.user_id = u.id
+     LEFT JOIN messages lm ON lm.id = (SELECT MAX(m2.id) FROM messages m2 WHERE m2.conversation_id = c.id)
+     WHERE u.role = 'user'
+     ORDER BY u.created_at DESC`
   ).all();
 
-  const lastMsgStmt = db.prepare(
-    `SELECT m.content, m.attachment_name, m.created_at, u.display_name AS sender_name, u.role AS sender_role
-     FROM messages m JOIN users u ON m.sender_id = u.id
-     WHERE m.conversation_id = ? ORDER BY m.id DESC LIMIT 1`
-  );
-  const convStmt = db.prepare('SELECT * FROM conversations WHERE user_id = ?');
-  const unreadStmt = db.prepare(
-    `SELECT COUNT(*) AS cnt FROM messages m
-     JOIN conversations c ON c.id = m.conversation_id
-     WHERE m.conversation_id = ? AND m.id > c.admin_last_read_id AND m.sender_id = c.user_id`
-  );
+  const users = rows.map((u) => ({
+    id: u.id,
+    username: u.username,
+    display_name: u.display_name,
+    role: u.role,
+    conversation_id: u.conversation_id,
+    last_message: u.last_message_time
+      ? (u.last_content || `[đính kèm: ${u.last_attachment_name || 'tệp'}]`)
+      : 'Chưa có tin nhắn',
+    last_message_time: u.last_message_time,
+    unread_count: u.unread_count,
+  }));
 
-  const result = users.map((u) => {
-    const conv = convStmt.get(u.id);
-    const convId = conv ? conv.id : null;
-    const lastMsg = convId ? lastMsgStmt.get(convId) : null;
-    const unreadCnt = convId ? unreadStmt.get(convId).cnt : 0;
-
-    let preview = 'Chưa có tin nhắn';
-    if (lastMsg) {
-      preview = lastMsg.content || `[đính kèm: ${lastMsg.attachment_name || 'tệp'}]`;
-    }
-
-    return {
-      id: u.id,
-      username: u.username,
-      display_name: u.display_name,
-      role: u.role,
-      conversation_id: convId,
-      last_message: preview,
-      last_message_time: lastMsg ? lastMsg.created_at : null,
-      unread_count: unreadCnt,
-    };
-  });
-
-  res.json({ success: true, users: result });
+  res.json({ success: true, users });
 });
 
 /**

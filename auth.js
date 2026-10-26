@@ -32,8 +32,8 @@ function requireRole(role) {
  * POST /api/login: kiểm tra username/password, đăng nhập (gắn session)
  */
 function login(req, res) {
-  const { username, password } = req.body;
-  if (!username || !password) {
+  const { username, password } = req.body || {};
+  if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
     return res.status(400).json({ error: 'Thiếu username hoặc password' });
   }
   const user = getUserByUsername(username);
@@ -44,18 +44,29 @@ function login(req, res) {
   if (!valid) {
     return res.status(401).json({ error: 'Tên đăng nhập hoặc mật khẩu sai' });
   }
-  // Gán session (Express session tự lưu cookie connect.sid, payload vào SQLite store)
-  req.session.user = {
+
+  const sessionUser = {
     id: user.id,
     username: user.username,
     role: user.role,
     display_name: user.display_name,
   };
-  // sessionId để client dùng cho socket handshake (?sessionId=...)
-  res.json({
-    success: true,
-    sessionId: req.session.id,
-    user: { id: user.id, username: user.username, role: user.role, display_name: user.display_name },
+
+  // Cấp session id mới khi đăng nhập (chống session fixation). Phải lưu xong
+  // vào store trước khi trả sessionId, vì client dùng nó để mở socket ngay.
+  req.session.regenerate((err) => {
+    if (err) {
+      console.error('session regenerate error:', err);
+      return res.status(500).json({ error: 'Lỗi tạo phiên đăng nhập' });
+    }
+    req.session.user = sessionUser;
+    req.session.save((saveErr) => {
+      if (saveErr) {
+        console.error('session save error:', saveErr);
+        return res.status(500).json({ error: 'Lỗi lưu phiên đăng nhập' });
+      }
+      res.json({ success: true, sessionId: req.session.id, user: sessionUser });
+    });
   });
 }
 
