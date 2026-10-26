@@ -4,13 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Tư vấn Nông nghiệp - Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body data-account-controls="headerControls">
   <div id="root">
     <div class="chat-area">
       <div class="chat-header">
-        <h2>Chuyên gia tư vấn</h2>
+        <h2><span class="status-dot" id="connDot"></span>Chuyên gia tư vấn</h2>
         <div class="chat-controls" id="headerControls">
           <span class="partner-chip" id="partnerChip" hidden></span>
           <button class="chat-btn" id="logoutBtn" type="button">Đăng xuất</button>
@@ -19,12 +22,15 @@
       <div class="messages-area" id="messagesArea"></div>
       <div class="attach-chip" id="attachChip"></div>
       <div class="input-area">
-        <button class="attach-btn" id="attachBtn" type="button" title="Gửi ảnh / tài liệu">+</button>
+        <button class="attach-btn" id="attachBtn" type="button" title="Gửi ảnh / tài liệu" aria-label="Gửi ảnh hoặc tài liệu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
         <input type="file" id="attachInput" hidden accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx">
         <input class="input-field" id="msgInput" type="text" placeholder="Nhập tin nhắn..." autocomplete="off">
-        <button class="input-btn" id="sendBtn">Gửi</button>
+        <button class="input-btn" id="sendBtn">Gửi
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+        </button>
       </div>
-      <div class="socket-status" id="socketStatus" hidden></div>
     </div>
   </div>
 

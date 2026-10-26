@@ -14,7 +14,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const sendBtn = document.getElementById('sendBtn');
   const attachBtn = document.getElementById('attachBtn');
   const chatTitle = document.getElementById('chatTitle');
-  const socketStatus = document.getElementById('socketStatus');
   const partnerSelect = document.getElementById('partnerSelect');
   const connectPartnerBtn = document.getElementById('connectPartnerBtn');
 
@@ -23,11 +22,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   let pendingFile = null;
   let usersReloadTimer = null;
 
-  function flashStatus(text) {
-    socketStatus.textContent = text;
-    socketStatus.hidden = false;
-    setTimeout(() => { socketStatus.hidden = true; }, 4000);
-  }
   function scrollBottom() {
     messagesArea.scrollTop = messagesArea.scrollHeight;
   }
@@ -38,6 +32,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!data || !data.success) return;
     const list = document.getElementById('adminUserList');
     list.innerHTML = '';
+    if (!data.users.length) {
+      const empty = document.createElement('div');
+      empty.className = 'no-partner';
+      empty.textContent = 'Chưa có khách hàng nào';
+      list.appendChild(empty);
+    }
     for (const u of data.users) {
       const item = document.createElement('div');
       item.className = 'user-item' + (u.conversation_id === selectedConvId ? ' active' : '');
@@ -46,13 +46,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const info = document.createElement('div');
       info.className = 'user-info';
+      const meta = document.createElement('div');
+      meta.className = 'user-meta';
       const name = document.createElement('div');
       name.className = 'user-name';
       name.textContent = u.display_name;
       const last = document.createElement('div');
       last.className = 'user-last-msg';
       last.textContent = u.last_message;
-      info.append(name, last);
+      meta.append(name, last);
+      info.append(avatarEl(u.display_name, 'user'), meta);
 
       const badge = document.createElement('span');
       badge.className = 'user-unread';
@@ -84,8 +87,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (data && data.success) {
       itemEl.remove();
       if (u.conversation_id === selectedConvId) resetChatArea();
+      toast(`Đã xóa tài khoản ${u.display_name}`, 'success');
     } else {
-      flashStatus((data && data.error) || 'Không xóa được tài khoản');
+      toast((data && data.error) || 'Không xóa được tài khoản', 'error');
     }
   }
 
@@ -169,19 +173,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       body: JSON.stringify({ partner_id: Number(partnerSelect.value) }),
     });
     if (data && data.success) {
-      flashStatus('Đã kết nối Partner cho khách hàng này.');
+      toast('Đã kết nối Partner cho khách hàng này.', 'success');
       selectConversation(selectedConvId, chatTitle.textContent);
     } else {
-      flashStatus((data && data.error) || 'Không gán được Partner');
+      toast((data && data.error) || 'Không gán được Partner', 'error');
     }
   });
 
   // ===== Socket =====
   const socket = io({ path: '/ws', query: { sessionId: getSessionId() } });
+  const typing = createTypingSender(socket, () => selectedConvId);
+  const typingView = createTypingView(messagesArea, scrollBottom);
+  wireConnectionIndicator(socket, document.getElementById('connDot'));
+
   socket.on('message', (msg) => {
     if (msg.convId !== selectedConvId) return;
+    typingView.hide();
     messagesArea.appendChild(messageEl(msg, msg.senderRole === 'admin'));
     scrollBottom();
+  });
+  socket.on('typing', (d) => {
+    if (d.convId !== selectedConvId || d.userId === myUser.id) return;
+    if (d.isTyping) typingView.show();
+    else typingView.hide();
   });
   socket.on('user-message', () => {
     clearTimeout(usersReloadTimer);
@@ -191,7 +205,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (convId !== selectedConvId) setBadge(convId, count);
   });
   socket.on('badge-cleared', ({ convId }) => setBadge(convId, 0));
-  socket.on('error', (e) => flashStatus(e.message));
+  socket.on('error', (e) => toast(e.message, 'error'));
 
   // ===== Gửi tin + đính kèm =====
   wireAttachButton('attachBtn', 'attachInput', 'attachChip', (res) => { pendingFile = res; });
@@ -201,10 +215,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!content && !pendingFile) return;
     socket.emit('message', { convId: selectedConvId, content, attachment: pendingFile });
     msgInput.value = '';
+    typing.stop();
     pendingFile = null;
     document.getElementById('attachChip').textContent = '';
   }
   sendBtn.addEventListener('click', sendMessage);
+  msgInput.addEventListener('input', typing.onInput);
   msgInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendMessage();
   });

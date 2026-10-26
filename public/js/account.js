@@ -49,7 +49,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       }),
     });
     msg.textContent = (res && res.error) || (status === 200 ? 'Đã đổi mật khẩu.' : 'Không đổi được mật khẩu');
-    if (status === 200) e.target.reset();
+    if (status === 200) {
+      e.target.reset();
+      toast('Đã đổi mật khẩu tài khoản.', 'success');
+    }
   });
 
   const delBtn = panel.querySelector('#deleteAccountBtn');
@@ -61,7 +64,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         clearSession();
         window.location.href = '/';
       } else {
-        alert((res && res.error) || 'Không xóa được tài khoản');
+        toast((res && res.error) || 'Không xóa được tài khoản', 'error');
       }
     });
   }

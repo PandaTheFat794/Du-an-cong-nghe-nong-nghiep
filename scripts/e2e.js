@@ -181,6 +181,27 @@ async function main() {
     const reply = await userGotP;
     check('user nhận tin admin realtime', reply.content === 'Admin trả lời đây', reply.content);
 
+    // typing indicator relay
+    const typingOnP = waitEvent(userSock, 'typing', (d) => d.isTyping === true);
+    adminSock.emit('typing', { convId, isTyping: true });
+    const tOn = await typingOnP;
+    check('relay typing: user nhận isTyping=true kèm tên người gõ',
+      tOn.convId === convId && typeof tOn.userId === 'number' && !!tOn.name, JSON.stringify(tOn));
+
+    const typingOffP = waitEvent(userSock, 'typing', (d) => d.isTyping === false);
+    adminSock.emit('typing', { convId, isTyping: false });
+    await typingOffP;
+    check('relay typing: isTyping=false truyền sang client đối diện', true);
+
+    // 🔍 probe: typing không kèm convId → server bỏ qua, không broadcast
+    let stray = false;
+    const strayHandler = () => { stray = true; };
+    userSock.on('typing', strayHandler);
+    adminSock.emit('typing', { convId: 0, isTyping: true });
+    await new Promise((r) => setTimeout(r, 500));
+    userSock.off('typing', strayHandler);
+    check('🔍 typing convId=0 → bị bỏ qua (không broadcast rỗng)', stray === false, `stray=${stray}`);
+
     const noRightP = waitEvent(userSock, 'error');
     userSock.emit('message', { convId: 999999, content: 'hack' });
     await noRightP;

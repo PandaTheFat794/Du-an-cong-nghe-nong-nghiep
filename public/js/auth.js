@@ -53,8 +53,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }),
     });
     if (data && data.success) {
+      registerForm.reset();
       switchTab(false);
-      alert('Đăng ký thành công! Bạn có thể đăng nhập ngay.');
+      toast('Đăng ký thành công! Bạn có thể đăng nhập ngay.', 'success');
     } else {
       showError((data && data.error) || 'Đăng ký thất bại');
     }

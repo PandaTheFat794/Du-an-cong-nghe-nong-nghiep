@@ -103,6 +103,108 @@ function wireLogout(buttonId) {
   if (btn) btn.addEventListener('click', logout);
 }
 
+// ===== Toast: thông báo nổi ở góc phải (thay cho alert/flash text) =====
+function toast(message, type = 'info', duration = 3500) {
+  let stack = document.querySelector('.toast-stack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.className = 'toast-stack';
+    document.body.appendChild(stack);
+  }
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = message;
+  stack.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 300);
+  }, duration);
+}
+
+// ===== Avatar chữ cái đầu (TDK của tên hiển thị) =====
+function initialsOf(name) {
+  const words = String(name || '?').trim().split(/\s+/);
+  return words.slice(-2).map((w) => w[0]).join('').toUpperCase();
+}
+function avatarEl(name, role) {
+  const av = document.createElement('div');
+  av.className = 'avatar' + (role ? ` role-${role}` : '');
+  av.textContent = initialsOf(name);
+  av.setAttribute('aria-hidden', 'true');
+  return av;
+}
+
+// ===== Typing indicator =====
+function typingRowEl() {
+  const row = document.createElement('div');
+  row.className = 'message admin typing-row';
+  const dots = document.createElement('span');
+  dots.className = 'typing-bubble';
+  for (let i = 0; i < 3; i += 1) dots.appendChild(document.createElement('i'));
+  row.appendChild(dots);
+  return row;
+}
+
+/** Người gửi: throttle "đang gõ" khi input thay đổi, tự tắt sau 2.5s ngừng gõ. */
+function createTypingSender(socket, getConvId) {
+  let active = false;
+  let stopTimer = null;
+  function stop() {
+    if (!active) return;
+    active = false;
+    clearTimeout(stopTimer);
+    const convId = getConvId();
+    if (convId) socket.emit('typing', { convId, isTyping: false });
+  }
+  return {
+    onInput() {
+      const convId = getConvId();
+      if (!convId) return;
+      if (!active) {
+        active = true;
+        socket.emit('typing', { convId, isTyping: true });
+      }
+      clearTimeout(stopTimer);
+      stopTimer = setTimeout(stop, 2500);
+    },
+    stop,
+  };
+}
+
+/** Người nhận: thêm/bớt bong bóng 3 chấm trong khung tin nhắn. */
+function createTypingView(area, scrollBottom) {
+  let row = null;
+  let hideTimer = null;
+  function hide() {
+    clearTimeout(hideTimer);
+    if (row) { row.remove(); row = null; }
+  }
+  return {
+    show() {
+      if (!row) {
+        row = typingRowEl();
+        area.appendChild(row);
+      }
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(hide, 5000); // phòng khi mất event isTyping:false
+      scrollBottom();
+    },
+    hide,
+  };
+}
+
+/** Dot trạng thái kết nối + toast khi rớt/mở lại socket. */
+function wireConnectionIndicator(socket, dotEl) {
+  socket.on('connect', () => {
+    if (dotEl) { dotEl.classList.add('online'); dotEl.classList.remove('offline'); }
+  });
+  socket.on('disconnect', () => {
+    if (dotEl) { dotEl.classList.add('offline'); dotEl.classList.remove('online'); }
+    toast('Mất kết nối máy chủ, đang thử kết nối lại...', 'error');
+  });
+}
+
 // Ô input file → gửi lên server, trả về {url, name} (dùng cho chat & admin)
 function wireAttachButton(attachBtnId, fileInputId, chipId, onResult) {
   const btn = document.getElementById(attachBtnId);
@@ -117,10 +219,11 @@ function wireAttachButton(attachBtnId, fileInputId, chipId, onResult) {
     try {
       const res = await uploadFile(file);
       if (chip) chip.textContent = `Đang đính kèm: ${res.name}`;
+      toast(`Đã tải lên ${res.name}`, 'success');
       onResult(res);
     } catch (e) {
-      if (chip) chip.textContent = `Lỗi: ${e.message}`;
-      setTimeout(() => { if (chip) chip.textContent = ''; }, 4000);
+      if (chip) chip.textContent = '';
+      toast(e.message, 'error');
     }
   });
 }

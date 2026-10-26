@@ -21,7 +21,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   for (const c of data.conversations) {
     const item = document.createElement('div');
     item.className = 'partner-item';
-    item.textContent = `${c.user_name} (${c.message_count} tin nhắn)`;
+    const label = document.createElement('span');
+    label.textContent = `${c.user_name} · ${c.message_count} tin nhắn`;
+    item.append(avatarEl(c.user_name, 'user'), label);
     item.addEventListener('click', () => openConversation(c.conversation_id, c.user_name, item));
     listEl.appendChild(item);
   }

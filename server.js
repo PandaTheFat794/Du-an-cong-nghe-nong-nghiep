@@ -167,6 +167,17 @@ io.on('connection', (socket) => {
     markAsRead(Number(convId));
     io.to('admins').emit('badge-cleared', { convId: Number(convId) });
   });
+
+  // Typing indicator: relay tới những người khác trong phòng (socket.to tự loại sender)
+  socket.on('typing', ({ convId, isTyping }) => {
+    if (!user || !convId) return;
+    socket.to(`conv_${Number(convId)}`).emit('typing', {
+      convId: Number(convId),
+      userId: user.id,
+      name: user.display_name,
+      isTyping: !!isTyping,
+    });
+  });
 });
 
 // ==== Khởi động Server ====

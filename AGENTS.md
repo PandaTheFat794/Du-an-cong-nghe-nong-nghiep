@@ -30,17 +30,18 @@ He thong web tu van truc tuyen (mo phong giao dien kieu Zalo chat):
   - chat.html: Giao dien chat cua User (gui tin + dinh kem, hien chip Partner).
   - admin.html: Sidebar khach hang + khung chat + chon/gan Partner.
   - partner.html: Danh sach khach duoc gan + lich su read-only.
-  - css/style.css: Layout Zalo-style.
-  - js/common.js: api(), uploadFile(), messageEl() (render textContent, chong XSS), parse thoi gian UTC tu SQLite.
+  - css/style.css: Design system "nong nghiep" (bien CSS, gradient, keyframe animation, glass login card, avatar mau theo role, toast, typing indicator, responsive + prefers-reduced-motion). **Luon khai bao `[hidden]{display:none}` cho moi class co set display** (da fix bug .user-unread, #loginForm/#registerForm, .partner-chip).
+  - js/common.js: api(), uploadFile(), messageEl() (render textContent, chong XSS), parse thoi gian UTC tu SQLite, toast(), avatarEl(), createTypingSender/createTypingView, wireConnectionIndicator.
   - js/account.js: panel "Tai khoan" tu mount qua <body data-account-controls="..."> — doi mat khau (moi role) + tu xoa tai khoan (role user).
   - js/{auth, chat, admin, partner}.js: Logic frontend tuong ung.
 - scripts/e2e.js: E2E test tu dong (REST + socket + upload + restart persist).
 
 ## 4. Trang thai hien tai & Luu y
-- Ca 3 luong User–Admin–Partner da chay that (E2E 40/40 + UI check 22/22 tren Edge headless).
+- Ca 3 luong User–Admin–Partner da chay that (E2E 43/43 + UI check 26/26 tren Edge headless, `.verify/ui-check.js`).
+- UI/UX da doi mau (theme xanh nong nghiep + animation): typing indicator realtime, toast thay alert(), avatar chu cai theo role, status ket noi (dot + toast khi roi/moi).
 - Tai khoan seed: **admin/admin123**, **partner1/admin123**, **user1/user123** (luu y: partner1 dung hash cua admin123).
 - Session da persist: restart server khong lam mat dang nhap (cookie + sessionId deu con hieu luc).
-- Socket event contract: client → `join {convId}`, `message {convId, content, attachment?}`, `read {convId}`; server → `joined`, `message`, `unread-badge`, `badge-cleared`, `user-message` (room `admins`), `error`.
+- Socket event contract: client → `join {convId}`, `message {convId, content, attachment?}`, `read {convId}`, `typing {convId, isTyping}`; server → `joined`, `message`, `unread-badge`, `badge-cleared`, `user-message` (room `admins`), `typing {convId, userId, name, isTyping}`, `error`.
 - Secret session: env `SESSION_SECRET` (co gia tri mac dinh cho dev).
 
 ## 5. Cach chay
