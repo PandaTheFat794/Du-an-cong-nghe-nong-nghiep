@@ -19,15 +19,16 @@ router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
   );
   const convStmt = db.prepare('SELECT * FROM conversations WHERE user_id = ?');
   const unreadStmt = db.prepare(
-    `SELECT COUNT(*) AS cnt FROM messages
-     WHERE conversation_id = ? AND created_at > (SELECT admin_read_at FROM conversations WHERE id = ?)`
+    `SELECT COUNT(*) AS cnt FROM messages m
+     JOIN conversations c ON c.id = m.conversation_id
+     WHERE m.conversation_id = ? AND m.id > c.admin_last_read_id AND m.sender_id = c.user_id`
   );
 
   const result = users.map((u) => {
     const conv = convStmt.get(u.id);
     const convId = conv ? conv.id : null;
     const lastMsg = convId ? lastMsgStmt.get(convId) : null;
-    const unreadCnt = convId ? unreadStmt.get(convId, convId).cnt : 0;
+    const unreadCnt = convId ? unreadStmt.get(convId).cnt : 0;
 
     let preview = 'Chưa có tin nhắn';
     if (lastMsg) {

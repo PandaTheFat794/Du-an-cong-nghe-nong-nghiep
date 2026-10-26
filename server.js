@@ -104,14 +104,14 @@ io.on('connection', (socket) => {
       socket.join(`conv_${conversation.id}`);
       socket.emit('joined', { convId: conversation.id, success: true, role: user.role });
       if (isAdmin) {
-        socket.emit('unread-badge', { convId: conversation.id, count: countUnread(conversation.id, conversation.admin_read_at) });
+        socket.emit('unread-badge', { convId: conversation.id, count: countUnread(conversation.id) });
       }
     } else {
       socket.emit('error', { message: 'Bạn không có quyền tham gia conversation này.' });
     }
   });
 
-  socket.on('message', ({ convId, content, attachment }) => {
+  socket.on('message', ({ convId, content, attachment, clientId }) => {
     if (!user) return socket.emit('error', { message: 'Chưa xác thực session.' });
 
     const conversation = getConversation(Number(convId));
@@ -146,12 +146,14 @@ io.on('connection', (socket) => {
       attachmentName: row.attachment_name,
       createdAt: row.created_at,
     };
+    // Echo lại clientId để client thay bubble "đang gửi" bằng tin thật
+    if (typeof clientId === 'string' && clientId.length <= 64) payload.clientId = clientId;
 
     io.to(`conv_${conversation.id}`).emit('message', payload);
 
     // Khách gửi tin → báo sidebar admin (badge unread + preview)
     if (!isAdmin) {
-      const unread = countUnread(conversation.id, conversation.admin_read_at);
+      const unread = countUnread(conversation.id);
       io.to('admins').emit('user-message', {
         convId: conversation.id,
         preview: row.content || `[đính kèm: ${row.attachment_name || 'tệp'}]`,

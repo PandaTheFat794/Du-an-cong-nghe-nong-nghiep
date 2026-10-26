@@ -25,18 +25,35 @@ db.exec(`
   );
 `);
 
-// Bảng conversations: id, user_id (unique), partner_id (NULL = chưa kết nối), admin_read_at, created_at
+// Bảng conversations: id, user_id (unique), partner_id (NULL = chưa kết nối),
+// admin_last_read_id (id tin cuối admin đã đọc), created_at
 db.exec(`
   CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER UNIQUE NOT NULL,
     partner_id INTEGER,
-    admin_read_at TEXT NOT NULL DEFAULT (datetime('now')),
+    admin_last_read_id INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (partner_id) REFERENCES users(id) ON DELETE SET NULL
   );
 `);
+
+// Migration DB cũ: admin_read_at (mốc thời gian, lệch ở biên giây) → admin_last_read_id
+const convColumns = db.prepare('PRAGMA table_info(conversations)').all().map((c) => c.name);
+if (!convColumns.includes('admin_last_read_id')) {
+  db.exec('ALTER TABLE conversations ADD COLUMN admin_last_read_id INTEGER NOT NULL DEFAULT 0');
+  // Giữ nguyên trạng thái đã đọc hiện tại thay vì biến toàn bộ lịch sử thành "chưa đọc"
+  db.exec(`
+    UPDATE conversations SET admin_last_read_id = COALESCE((
+      SELECT MAX(m.id) FROM messages m
+      WHERE m.conversation_id = conversations.id AND m.created_at <= conversations.admin_read_at
+    ), 0)
+  `);
+}
+if (convColumns.includes('admin_read_at')) {
+  db.exec('ALTER TABLE conversations DROP COLUMN admin_read_at');
+}
 
 // Bảng messages: tin nhắn chat, kèm file đính kèm (optional)
 db.exec(`
@@ -93,9 +110,17 @@ const statements = {
   insertMessage: db.prepare(
     'INSERT INTO messages (conversation_id, sender_id, content, attachment_url, attachment_name) VALUES (?, ?, ?, ?, ?)'
   ),
-  markAsRead: db.prepare(`UPDATE conversations SET admin_read_at = datetime('now') WHERE id = ?`),
+  // Đánh dấu đã đọc = ghi nhận id tin cuối cùng của conversation
+  markAsRead: db.prepare(
+    `UPDATE conversations SET admin_last_read_id = COALESCE(
+       (SELECT MAX(id) FROM messages WHERE conversation_id = conversations.id), 0)
+     WHERE id = ?`
+  ),
+  // Chưa đọc = tin của CHÍNH khách hàng sau mốc đã đọc (không tính tin admin tự gửi)
   countUnread: db.prepare(
-    'SELECT COUNT(*) AS cnt FROM messages WHERE conversation_id = ? AND created_at > ?'
+    `SELECT COUNT(*) AS cnt FROM messages m
+     JOIN conversations c ON c.id = m.conversation_id
+     WHERE m.conversation_id = ? AND m.id > c.admin_last_read_id AND m.sender_id = c.user_id`
   ),
   connectPartner: db.prepare('UPDATE conversations SET partner_id = ? WHERE id = ?'),
   getConversation: db.prepare(
@@ -130,11 +155,11 @@ module.exports = {
     return statements.getMessageById.get(info.lastInsertRowid);
   },
 
-  // Cập nhật admin_read_at (client gọi khi admin mở chat)
+  // Đánh dấu admin đã đọc tới tin mới nhất (client gọi khi admin mở chat)
   markAsRead: (convId) => statements.markAsRead.run(convId),
 
-  // Đếm tin nhắn chưa đọc (tin mới sau lần admin đọc gần nhất)
-  countUnread: (convId, adminReadAt) => statements.countUnread.get(convId, adminReadAt).cnt,
+  // Đếm tin chưa đọc của admin (chỉ tin do khách hàng gửi sau mốc đã đọc)
+  countUnread: (convId) => statements.countUnread.get(convId).cnt,
 
   // Gán partner cho conversation
   connectPartner: (convId, partnerId) => statements.connectPartner.run(partnerId, convId),

@@ -95,6 +95,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function resetChatArea() {
     selectedConvId = null;
+    typingView.hide();
+    pendingSends.clear();
     chatTitle.textContent = 'Chọn một khách hàng để tư vấn';
     [msgInput, sendBtn, attachBtn].forEach((el) => { el.disabled = true; });
     partnerSelect.hidden = true;
@@ -117,6 +119,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ===== Chọn cuộc trò chuyện =====
   async function selectConversation(convId, title) {
     selectedConvId = convId;
+    typingView.hide(); // bong bóng "đang gõ" của conversation cũ
+    pendingSends.clear(); // bubble tạm của conv cũ sẽ bị innerHTML xoá bên dưới
     document.querySelectorAll('.user-item').forEach((el) => {
       el.classList.toggle('active', Number(el.dataset.convId) === convId);
     });
@@ -184,9 +188,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const socket = io({ path: '/ws', query: { sessionId: getSessionId() } });
   const typing = createTypingSender(socket, () => selectedConvId);
   const typingView = createTypingView(messagesArea, scrollBottom);
+  const pendingSends = new Map(); // clientId → bubble "đang gửi" chờ server xác nhận
   wireConnectionIndicator(socket, document.getElementById('connDot'));
 
   socket.on('message', (msg) => {
+    const pending = msg.clientId && pendingSends.get(msg.clientId);
+    if (pending) {
+      pending.el.remove();
+      pendingSends.delete(msg.clientId);
+    }
     if (msg.convId !== selectedConvId) return;
     typingView.hide();
     messagesArea.appendChild(messageEl(msg, msg.senderRole === 'admin'));
@@ -205,19 +215,53 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (convId !== selectedConvId) setBadge(convId, count);
   });
   socket.on('badge-cleared', ({ convId }) => setBadge(convId, 0));
-  socket.on('error', (e) => toast(e.message, 'error'));
+  socket.on('error', (e) => {
+    toast(e.message, 'error');
+    failAllPending();
+  });
 
   // ===== Gửi tin + đính kèm =====
+  const attachChip = document.getElementById('attachChip');
   wireAttachButton('attachBtn', 'attachInput', 'attachChip', (res) => { pendingFile = res; });
+
+  function failAllPending() {
+    for (const p of pendingSends.values()) {
+      p.el.remove();
+      if (!msgInput.value && p.content) msgInput.value = p.content;
+      if (!pendingFile && p.file) {
+        pendingFile = p.file;
+        attachChip.textContent = `Đang đính kèm: ${p.file.name}`;
+      }
+    }
+    pendingSends.clear();
+  }
 
   function sendMessage() {
     const content = msgInput.value.trim();
     if (!content && !pendingFile) return;
-    socket.emit('message', { convId: selectedConvId, content, attachment: pendingFile });
+    if (!socket.connected) {
+      toast('Chưa kết nối lại được máy chủ, tin chưa được gửi.', 'error');
+      return;
+    }
+    const draft = { content, attachment: pendingFile };
+    const clientId = `m${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+
+    const el = messageEl({
+      content,
+      attachmentUrl: pendingFile ? pendingFile.url : null,
+      attachmentName: pendingFile ? pendingFile.name : null,
+      createdAt: utcNowDb(),
+    }, true);
+    el.classList.add('pending');
+    messagesArea.appendChild(el);
+    scrollBottom();
+    pendingSends.set(clientId, { el, content, file: pendingFile });
+
+    socket.emit('message', { convId: selectedConvId, ...draft, clientId });
     msgInput.value = '';
     typing.stop();
     pendingFile = null;
-    document.getElementById('attachChip').textContent = '';
+    attachChip.textContent = '';
   }
   sendBtn.addEventListener('click', sendMessage);
   msgInput.addEventListener('input', typing.onInput);

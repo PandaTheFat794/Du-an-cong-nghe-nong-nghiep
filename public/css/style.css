@@ -334,6 +334,9 @@ body {
 .message-sender { font-size: 0.7rem; font-weight: 700; color: var(--primary-dark); margin-bottom: 1px; }
 .message-time { font-size: 0.64rem; opacity: 0.65; margin-top: 3px; text-align: right; }
 .message.admin .message-time { text-align: left; }
+/* Bubble tạm trong lúc chờ server xác nhận */
+.message.pending { opacity: 0.6; }
+.message.pending .message-time::after { content: " · đang gửi"; font-weight: 600; }
 .message-img {
   max-width: 240px; width: 100%; border-radius: 12px; display: block; margin-top: 0.35rem;
   cursor: zoom-in; transition: transform var(--dur);

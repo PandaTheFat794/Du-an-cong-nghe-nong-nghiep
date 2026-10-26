@@ -46,6 +46,9 @@ const IMAGE_EXT_RE = /\.(jpe?g|png|gif|webp)$/i;
 function parseDbTime(value) {
   return new Date(String(value).replace(' ', 'T') + 'Z');
 }
+function utcNowDb() {
+  return new Date().toISOString().slice(0, 19).replace('T', ' ');
+}
 function formatTime(value) {
   return parseDbTime(value).toLocaleTimeString('vi-VN');
 }

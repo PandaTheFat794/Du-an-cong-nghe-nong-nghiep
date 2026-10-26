@@ -216,6 +216,22 @@ async function main() {
     outsiderSock.close();
     userSock.off('typing', typingCounter);
 
+    // ===== Unread badge: chỉ đếm tin khách, mốc so sánh theo id tin nhắn =====
+    r = await httpJson('/api/admin/users', { cookie: admin.cookie });
+    const rowAfterReply = r.data.users.find((u) => u.conversation_id === convId);
+    check('admin tự trả lời → unread của chính admin = 0', rowAfterReply.unread_count === 0, `unread=${rowAfterReply.unread_count}`);
+
+    const badgeAfterReadP = waitEvent(adminSock, 'unread-badge', (d) => d.convId === convId);
+    userSock.emit('message', { convId, content: 'Tin ngay sau khi admin đọc' });
+    const badgeAfterRead = await badgeAfterReadP;
+    check('user gửi ngay sau khi admin đọc → unread-badge = 1', badgeAfterRead.count === 1, `count=${badgeAfterRead.count}`);
+
+    // 🔍 clientId được echo lại để client thay bubble "đang gửi"
+    const echoP = waitEvent(userSock, 'message', (m) => !!m.clientId);
+    userSock.emit('message', { convId, content: 'có clientId', clientId: 'test-client-1' });
+    const echoed = await echoP;
+    check('🔍 message echo clientId về đúng client', echoed.clientId === 'test-client-1', `clientId=${echoed.clientId}`);
+
     const noRightP = waitEvent(userSock, 'error');
     userSock.emit('message', { convId: 999999, content: 'hack' });
     await noRightP;
