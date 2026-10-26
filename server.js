@@ -1,159 +1,145 @@
 const express = require('express');
 const http = require('http');
 const path = require('path');
-const { db } = require('./db');
-const authMiddleware = require('./auth');
+const session = require('express-session');
+const { Server } = require('socket.io');
+
+const { store, getSessionUser } = require('./session-store');
+const { getConversation, insertMessage, countUnread, markAsRead } = require('./db');
 const authRoutes = require('./routes/auth');
 const chatRoutes = require('./routes/chat');
 const adminRoutes = require('./routes/admin');
+const partnerRoutes = require('./routes/partner');
+const uploadRoutes = require('./routes/upload');
 
 const app = express();
 const server = http.createServer(app);
 
-// === Cấu hình express-session (lưu session vào RAM/server memory) ===
-const session = require('express-session');
+// === express-session, lưu vào SQLite (sống sót qua restart) ===
+app.use(express.json());
 app.use(
   session({
-    secret: 'flickering-humming-prism-secret-key-mk',
+    secret: process.env.SESSION_SECRET || 'tu-van-nong-nghiep-dev-secret',
+    store,
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 24 * 60 * 60 * 1000 }, // 1 day
+    rolling: true,
+    cookie: { maxAge: 24 * 60 * 60 * 1000, httpOnly: true }, // 1 ngày
   })
 );
 
-// Lưu trữ session để dùng cho socket.io verification (manual Map)
-const sessionMap = new Map(); // key: sessionID, value: { id, username, role }
+// === Socket.io (handshake mang ?sessionId= để định danh) ===
+const io = new Server(server, { path: '/ws' });
 
-// === Socket.io setup ===
-const io = require('socket.io')(server, {
-  path: '/ws',
-  // transports: ['polling'], // ổn định hơn trên mạng lan/NAT
-});
-
-// Khi có kết nối socket.io, thử verify session qua query string sessionId
 io.use((socket, next) => {
-  // Lấy sessionId từ query string (?sessionId=...)
-  const sessionId = socket.handshake.query.sessionId;
-  if (sessionId && sessionMap.has(sessionId)) {
-    // Gắn thông tin user vào socket object để dùng sau này
-    socket.user = sessionMap.get(sessionId);
-    return next();
-  }
-  // Nếu không có sessionId hoặc không hợp lệ, vẫn cho kết nối nhưng không có user
-  // (client phải login trước khi join room)
+  const user = getSessionUser(socket.handshake.query.sessionId);
+  if (user) socket.user = user;
   next();
 });
 
-// ==== Gắn routes REST API ====
+// === REST API ===
 app.use('/api', authRoutes);
-app.use('/api', chatRoutes);
-app.use('/api', adminRoutes);
+app.use('/api/conversations', chatRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/partner', partnerRoutes);
+app.use('/api', uploadRoutes);
+app.use('/api', (req, res) => res.status(404).json({ error: 'API not found' }));
 
-// ==== Serves static files từ folder public ====
+// === Trang theo role (yêu cầu đăng nhập đúng role, ngược lại về login) ===
+function pageGuard(role) {
+  return (req, res, next) => {
+    if (req.session && req.session.user && req.session.user.role === role) return next();
+    res.redirect('/');
+  };
+}
+app.get('/chat', pageGuard('user'), (req, res) => res.sendFile(path.join(__dirname, 'public', 'chat.html')));
+app.get('/admin', pageGuard('admin'), (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
+app.get('/partner', pageGuard('partner'), (req, res) => res.sendFile(path.join(__dirname, 'public', 'partner.html')));
+
+// === Static files ===
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Route fallback: nếu không có file static -> trả về index.html (cho SPA/client-side routing)
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// ==== Xử lý các sự kiện Socket.io ====
-
-// 1. Client gửi 'join' kèm convId + sessionId để tham gia room chat
+// ==== Socket.io events ====
+// Hợp đồng sự kiện:
+//   client → server: 'join' {convId}, 'message' {convId, content, attachment?}, 'read' {convId}
+//   server → client: 'joined', 'message', 'unread-badge', 'badge-cleared', 'user-message' (room admins), 'error'
 io.on('connection', (socket) => {
-  console.log(`⚡ User connected: ${socket.id}, session user:`, socket.user ? socket.user.username : 'none');
+  const user = socket.user;
+  if (user && user.role === 'admin') socket.join('admins');
 
-  socket.on('join', ({ convId, sessionId }) => {
-    // Verify session lại一 lần (bảo vệ)
-    const user = sessionMap.get(sessionId);
-    if (!user) {
-      return socket.emit('error', { message: 'Chưa có Session hợp lệ, vui lòng đăng nhập.' });
-    }
+  socket.on('join', ({ convId }) => {
+    if (!user) return socket.emit('error', { message: 'Chưa có Session hợp lệ, vui lòng đăng nhập.' });
 
-    // Kiểm tra user có quyền tham gia conversation này không
-    const conversation = db.getConversation(parseInt(convId, 10));
-    if (!conversation) {
-      return socket.emit('error', { message: 'Conversation không tồn tại.' });
-    }
+    const conversation = getConversation(Number(convId));
+    if (!conversation) return socket.emit('error', { message: 'Conversation không tồn tại.' });
 
     const isAdmin = user.role === 'admin';
     const isOwner = conversation.user_id === user.id;
-    const isPartner = conversation.partner_id && conversation.partner_id === user.id;
+    const isAssignedPartner = conversation.partner_id === user.id;
 
-    if (isAdmin || isOwner || isPartner) {
-      socket.join(`conv_${convId}`);
-      socket.emit('joined', { convId, success: true, role: user.role });
-      // Gửi lại badge unread count cho admin nếu có
-      if (isAdmin && conversation.admin_read_at) {
-        const unread = db.countUnread(parseInt(convId, 10), conversation.admin_read_at);
-        socket.emit('unread-badge', { convId, count: unread });
+    if (isAdmin || isOwner || isAssignedPartner) {
+      socket.join(`conv_${conversation.id}`);
+      socket.emit('joined', { convId: conversation.id, success: true, role: user.role });
+      if (isAdmin) {
+        socket.emit('unread-badge', { convId: conversation.id, count: countUnread(conversation.id, conversation.admin_read_at) });
       }
-      console.log(`👤 User ${user.username} joinedconv_${convId} (admin=${isAdmin},owner=${isOwner},partner=${isPartner})`);
     } else {
       socket.emit('error', { message: 'Bạn không có quyền tham gia conversation này.' });
     }
   });
 
-  // 2. Client gửi 'message' (Dùng khi user/admin gửi tin nhắn mới)
-  socket.on('message', async ({ convId, sessionId, content }) => {
-    const user = sessionMap.get(sessionId);
+  socket.on('message', ({ convId, content, attachment }) => {
     if (!user) return socket.emit('error', { message: 'Chưa xác thực session.' });
 
-    const convNum = parseInt(convId, 10);
-    const conversation = db.getConversation(convNum);
+    const conversation = getConversation(Number(convId));
     if (!conversation) return socket.emit('error', { message: 'Conversation không tồn tại.' });
 
-    // Quyền gửi tin: owner (user) hoặc admin mới được gửi
+    // Chỉ chủ cuộc trò chuyện (user) hoặc admin được gửi; partner chỉ đọc
     const isOwner = conversation.user_id === user.id;
     const isAdmin = user.role === 'admin';
     if (!isOwner && !isAdmin) {
       return socket.emit('error', { message: 'Bạn không có quyền gửi tin nhắn vào conversation này.' });
     }
 
-    // Lưu tin nhắn vào DB (sender_id là user đang login)
-    db.insertMessage(convNum, user.id, content);
-
-    // Broadcast tin nhắn về room conv_<convId>
-    io.to(`conv_${convNum}`).emit('message', {
-      id: Date.now(), // tạm thời ID
-      convId: convNum,
-      senderId: user.id,
-      senderName: user.display_name,
-      senderRole: user.role,
-      content,
-      created_at: new Date().toISOString(),
-    });
-
-    // Cập nhật badge unread cho admin (nếu admin không đangอยู่ room nhưng có session)
-    if (conversation && user.role === 'admin') {
-      // Cập nhật admin_read_at không, đơn giản là tăng badge
-      io.to(`conv_${convNum}`).emit('unread-badge', {
-        convId: convNum,
-        count: (db.countUnread(convNum, conversation.admin_read_at) || 0) + 1,
-      });
+    const text = (content || '').toString().trim();
+    const fileUrl = attachment && attachment.url ? attachment.url : null;
+    const fileName = attachment && attachment.name ? attachment.name : null;
+    if (!text && !fileUrl) {
+      return socket.emit('error', { message: 'Tin nhắn trống.' });
     }
 
-    console.log(`💬 Message from ${user.username} in conv_${convNum}: ${content}`);
+    const row = insertMessage(conversation.id, user.id, text, fileUrl, fileName);
+    const payload = {
+      id: row.id,
+      convId: conversation.id,
+      senderId: row.sender_id,
+      senderName: user.display_name,
+      senderRole: user.role,
+      content: row.content,
+      attachmentUrl: row.attachment_url,
+      attachmentName: row.attachment_name,
+      createdAt: row.created_at,
+    };
+
+    io.to(`conv_${conversation.id}`).emit('message', payload);
+
+    // Khách gửi tin → báo sidebar admin (badge unread + preview)
+    if (!isAdmin) {
+      const unread = countUnread(conversation.id, conversation.admin_read_at);
+      io.to('admins').emit('user-message', {
+        convId: conversation.id,
+        preview: row.content || `[đính kèm: ${row.attachment_name || 'tệp'}]`,
+        createdAt: row.created_at,
+      });
+      io.to('admins').emit('unread-badge', { convId: conversation.id, count: unread });
+    }
   });
 
-  // 3. Client gửi 'read' (admin đã đọc xong tin nhắn, xoá badge)
-  socket.on('read', ({ convId, sessionId }) => {
-    const user = sessionMap.get(sessionId);
+  // Admin mở cuộc trò chuyện → đánh dấu đã đọc, xoá badge
+  socket.on('read', ({ convId }) => {
     if (!user || user.role !== 'admin') return;
-
-    const convNum = parseInt(convId, 10);
-    db.markAsRead(convNum, user.id); // cập nhật admin_read_at ở DB
-
-    // Tín hiệu cho client cập nhật giao diện badge
-    io.to(`conv_${convNum}`).emit('badge-cleared', { convId: convNum });
-    console.log(`👁️ Admin ${user.username} marked conversation ${convNum} as read`);
-  });
-
-  // 4. Ngắt kết nối
-  socket.on('disconnect', () => {
-    // Xóa user khỏi sessionMap nếu muốn (tùy chọn, có thể giữ vòng đời session)
-    // Ở đây chúng ta giữ sessionMap chung cho toàn server cho đơn giản.
-    console.log(`⚡ User disconnected: ${socket.id}`);
+    markAsRead(Number(convId));
+    io.to('admins').emit('badge-cleared', { convId: Number(convId) });
   });
 });
 

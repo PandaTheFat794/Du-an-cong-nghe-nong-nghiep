@@ -1,7 +1,14 @@
+const path = require('path');
+const fs = require('fs');
 const Database = require('better-sqlite3');
 
-// Mở/Create file data/app.db (không cần tạo folder riêng, better-sqlite3 tự tạo file)
-const db = new Database('./data/app.db', { verbose: console.log });
+// DB ghi ra file (mặc định ./data/app.db). E2E test trỏ DB_PATH sang file tạm riêng.
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'app.db');
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+
+const db = new Database(DB_PATH, {
+  verbose: process.env.DB_DEBUG ? console.log : undefined,
+});
 
 // Bảng users: id, username (unique), password_hash, display_name, role, created_at
 db.exec(`
@@ -28,13 +35,15 @@ db.exec(`
   );
 `);
 
-// Bảng messages: id, conversation_id, sender_id, content, created_at
+// Bảng messages: tin nhắn chat, kèm file đính kèm (optional)
 db.exec(`
   CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id INTEGER NOT NULL,
     sender_id INTEGER NOT NULL,
-    content TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    attachment_url TEXT,
+    attachment_name TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
     FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE
@@ -48,74 +57,85 @@ if (!existingAdmin) {
   const adminPasswordHash = bcrypt.hashSync('admin123', 10);
   const userPasswordHash = bcrypt.hashSync('user123', 10);
 
-  const adminUser = db.prepare(
+  const insertUser = db.prepare(
     'INSERT INTO users (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)'
-  ).run('admin', adminPasswordHash, 'Quản trị viên', 'admin');
+  );
 
-  const partnerUser = db.prepare(
-    'INSERT INTO users (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)'
-  ).run('partner1', adminPasswordHash, 'Partner Test', 'partner');
-
-  const user1 = db.prepare(
-    'INSERT INTO users (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)'
-  ).run('user1', userPasswordHash, 'Khách hàng Test', 'user');
+  // Lưu ý: partner1 seed bằng admin123 để tiện test (partner1/admin123)
+  const adminUser = insertUser.run('admin', adminPasswordHash, 'Quản trị viên', 'admin');
+  const partnerUser = insertUser.run('partner1', adminPasswordHash, 'Partner Test', 'partner');
+  const user1 = insertUser.run('user1', userPasswordHash, 'Khách hàng Test', 'user');
 
   // Mỗi user tự động có 1 conversation duy nhất với admin
-  db.prepare('INSERT INTO conversations (user_id) VALUES (?)').run(adminUser.lastInsertRowid);
-  db.prepare('INSERT INTO conversations (user_id) VALUES (?)').run(partnerUser.lastInsertRowid);
-  db.prepare('INSERT INTO conversations (user_id) VALUES (?)').run(user1.lastInsertRowid);
+  const insertConv = db.prepare('INSERT INTO conversations (user_id) VALUES (?)');
+  insertConv.run(adminUser.lastInsertRowid);
+  insertConv.run(partnerUser.lastInsertRowid);
+  insertConv.run(user1.lastInsertRowid);
 
-  console.log('✅ DB seeded: admin / admin123, partner1 / partner123, user1 / user123');
-} else {
-  console.log('ℹ️ DB đã có dữ liệu, bỏ qua seed.');
+  console.log('✅ DB seeded: admin/admin123, partner1/admin123, user1/user123');
 }
 
-// Export helpers dùng cho routes
+const statements = {
+  getUserByUsername: db.prepare('SELECT * FROM users WHERE username = ?'),
+  getConversationByUserId: db.prepare('SELECT * FROM conversations WHERE user_id = ?'),
+  insertConversation: db.prepare('INSERT INTO conversations (user_id) VALUES (?)'),
+  getMessages: db.prepare(
+    `SELECT m.id, m.sender_id AS senderId, m.content, m.attachment_url AS attachmentUrl,
+            m.attachment_name AS attachmentName, m.created_at AS createdAt,
+            u.display_name AS senderName, u.role AS senderRole
+     FROM messages m JOIN users u ON m.sender_id = u.id
+     WHERE m.conversation_id = ? ORDER BY m.id ASC`
+  ),
+  getMessageById: db.prepare('SELECT * FROM messages WHERE id = ?'),
+  insertMessage: db.prepare(
+    'INSERT INTO messages (conversation_id, sender_id, content, attachment_url, attachment_name) VALUES (?, ?, ?, ?, ?)'
+  ),
+  markAsRead: db.prepare(`UPDATE conversations SET admin_read_at = datetime('now') WHERE id = ?`),
+  countUnread: db.prepare(
+    'SELECT COUNT(*) AS cnt FROM messages WHERE conversation_id = ? AND created_at > ?'
+  ),
+  connectPartner: db.prepare('UPDATE conversations SET partner_id = ? WHERE id = ?'),
+  getConversation: db.prepare(
+    `SELECT c.*, u.display_name AS user_name, u.role AS user_role,
+            p.display_name AS partner_name, p.role AS partner_role
+     FROM conversations c
+     LEFT JOIN users u ON c.user_id = u.id
+     LEFT JOIN users p ON c.partner_id = p.id
+     WHERE c.id = ?`
+  ),
+};
+
 module.exports = {
   db,
-  // Lấy user để so sánh password (từ middleware)
-  getUserByUsername: (username) => db.prepare('SELECT * FROM users WHERE username = ?').get(username),
-  // Tìm hoặc tạo conversation cho user_id (kiều 1-1 với admin)
-  getOrCreateConversation: (userId) => {
-    // Dùng transaction an toàn
-    return db.transaction(() => {
-      // Kiểm tra conversation đã có cho user này chưa
-      let conv = db.prepare('SELECT * FROM conversations WHERE user_id = ?').get(userId);
-      if (!conv) {
-        // Nếu chưa có → tạo mới (chỉ khi DB rỗng, trường hợp test)
-        conv = db.prepare('INSERT INTO conversations (user_id) VALUES (?)').run(userId).lastInsertRowid;
-      }
-      return conv;
-    })();
+
+  getUserByUsername: (username) => statements.getUserByUsername.get(username),
+
+  // Tìm hoặc tạo conversation 1-1 của user với admin (luôn trả về row object)
+  getOrCreateConversation: (userId) =>
+    db.transaction(() => {
+      const conv = statements.getConversationByUserId.get(userId);
+      if (conv) return conv;
+      const info = statements.insertConversation.run(userId);
+      return statements.getConversationByUserId.get(info.lastInsertRowid);
+    })(),
+
+  getMessages: (convId) => statements.getMessages.all(convId),
+
+  // chèn tin (kèm file đính kèm optional), trả về row đã lưu
+  insertMessage: (convId, senderId, content, attachmentUrl = null, attachmentName = null) => {
+    const info = statements.insertMessage.run(convId, senderId, content, attachmentUrl, attachmentName);
+    return statements.getMessageById.get(info.lastInsertRowid);
   },
-  // Lấy tất cả messages của 1 conversation
-  getMessages: (convId) =>
-    db
-      .prepare(
-        `SELECT m.content, m.created_at, u.display_name, u.role FROM messages m JOIN users u ON m.sender_id = u.id WHERE m.conversation_id = ? ORDER BY m.created_at ASC`,
-      )
-      .all(convId),
-  // Gửi message mới
-  insertMessage: (convId, senderId, content) =>
-    db.prepare('INSERT INTO messages (conversation_id, sender_id, content) VALUES (?, ?, ?)').run(convId, senderId, content),
-  // Cập nhật admin_read_at (client gọi khiadmin mở chat)
-  markAsRead: (convId, adminId) =>
-    db
-      .prepare(`UPDATE conversations SET admin_read_at = datetime('now') WHERE id = ?`)
-      .run(convId),
-  // Đếm tin nhắn chưa đọc (tin mới sau lần admin đã đọc trước)
-  countUnread: (convId, adminReadAt) =>
-    db
-      .prepare(
-        `SELECT COUNT(*) AS cnt FROM messages WHERE conversation_id = ? AND created_at > ?`,
-      )
-      .get(convId, adminReadAt).cnt,
+
+  // Cập nhật admin_read_at (client gọi khi admin mở chat)
+  markAsRead: (convId) => statements.markAsRead.run(convId),
+
+  // Đếm tin nhắn chưa đọc (tin mới sau lần admin đọc gần nhất)
+  countUnread: (convId, adminReadAt) => statements.countUnread.get(convId, adminReadAt).cnt,
+
   // Gán partner cho conversation
-  connectPartner: (convId, partnerId) =>
-    db.prepare('UPDATE conversations SET partner_id = ? WHERE id = ?').run(partnerId, convId),
-  // Lấy thông tin conversation kèm user + partner (nếu có)
-  getConversation: (convId) =>
-    db.prepare(
-      `SELECT c.*, u.display_name AS user_name, u.role AS user_role, p.display_name AS partner_name, p.role AS partner_role FROM conversations c LEFT JOIN users u ON c.user_id = u.id LEFT JOIN users p ON c.partner_id = p.id WHERE c.id = ?`,
-    ).get(convId),
+  connectPartner: (convId, partnerId) => statements.connectPartner.run(partnerId, convId),
+
+  // Conversation kèm tên user + partner (nếu có)
+  getConversation: (convId) => statements.getConversation.get(convId),
 };

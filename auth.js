@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const { db } = require('./db');
+const { getUserByUsername } = require('./db');
 
 /**
  * Lấy thông tin user hiện tại từ session (gán bởi express-session)
@@ -7,7 +7,7 @@ const { db } = require('./db');
  */
 function requireAuth(req, res, next) {
   if (req.session && req.session.user) {
-    const user = db.getUserByUsername(req.session.user.username);
+    const user = getUserByUsername(req.session.user.username);
     if (user) {
       req.user = user; // { id, username, password_hash, display_name, role, ... }
       return next();
@@ -36,7 +36,7 @@ function login(req, res) {
   if (!username || !password) {
     return res.status(400).json({ error: 'Thiếu username hoặc password' });
   }
-  const user = db.getUserByUsername(username);
+  const user = getUserByUsername(username);
   if (!user) {
     return res.status(401).json({ error: 'Tên đăng nhập hoặc mật khẩu sai' });
   }
@@ -44,9 +44,19 @@ function login(req, res) {
   if (!valid) {
     return res.status(401).json({ error: 'Tên đăng nhập hoặc mật khẩu sai' });
   }
-  // Gán session (Express session tự lưu cookie connect.sid)
-  req.session.user = { id: user.id, username: user.username, role: user.role };
-  res.json({ success: true, user: { id: user.id, username: user.username, role: user.role, display_name: user.display_name } });
+  // Gán session (Express session tự lưu cookie connect.sid, payload vào SQLite store)
+  req.session.user = {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    display_name: user.display_name,
+  };
+  // sessionId để client dùng cho socket handshake (?sessionId=...)
+  res.json({
+    success: true,
+    sessionId: req.session.id,
+    user: { id: user.id, username: user.username, role: user.role, display_name: user.display_name },
+  });
 }
 
 /**
@@ -64,14 +74,13 @@ function logout(req, res) {
 }
 
 /**
- * GET /api/me: trả về thông tin user hiện tại
+ * GET /api/me: trả về thông tin user hiện tại (đọc trực tiếp từ session)
  */
 function me(req, res) {
-  if (req.user) {
-    res.json({ success: true, user: { id: req.user.id, username: req.user.username, role: req.user.role, display_name: req.user.display_name } });
-  } else {
-    res.status(401).json({ error: 'Chưa đăng nhập' });
+  if (req.session && req.session.user) {
+    return res.json({ success: true, user: req.session.user });
   }
+  res.status(401).json({ error: 'Chưa đăng nhập' });
 }
 
 module.exports = { requireAuth, requireRole, login, logout, me };

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../auth');
-const db = require('../db');
+const { getConversation, getMessages } = require('../db');
 
 /**
  * GET /api/conversations/:id/messages
@@ -14,7 +14,7 @@ router.get('/:convId/messages', requireAuth, (req, res) => {
   const userId = req.user.id;
 
   // Lấy thông tin conversation để kiểm tra quyền
-  const conversation = db.getConversation(convId);
+  const conversation = getConversation(convId);
   if (!conversation) {
     return res.status(404).json({ error: 'Conversation không tồn tại' });
   }
@@ -28,7 +28,7 @@ router.get('/:convId/messages', requireAuth, (req, res) => {
   const isPartner = conversation.partner_id && conversation.partner_id === userId;
 
   if (isAdmin || isOwner || isPartner) {
-    const messages = db.getMessages(convId);
+    const messages = getMessages(convId);
     res.json({ success: true, messages, conversation });
   } else {
     res.status(403).json({ error: 'Bạn không có quyền xem conversation này' });
