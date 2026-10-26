@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tư vấn Nông nghiệp - Partner</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="root">
+    <div class="partner-sidebar">
+      <div class="partner-header">
+        <h1>Lộ trình tư vấn</h1>
+        <span class="user-name" id="partnerName"></span>
+      </div>
+      <div class="partner-list" id="partnerList"></div>
+      <button class="chat-btn partner-logout" id="logoutBtn" type="button">Đăng xuất</button>
+    </div>
+    <div class="chat-view">
+      <div class="partner-messages" id="partnerMessages">
+        <div class="no-partner" id="noPartnerMsg">Chưa có khách hàng nào được gán cho bạn</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/ws/socket.io.js"></script>
+  <script src="/js/common.js"></script>
+  <script src="/js/partner.js"></script>
+</body>
+</html>

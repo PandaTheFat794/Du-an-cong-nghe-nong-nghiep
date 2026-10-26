@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tư vấn Nông nghiệp - Admin</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="root">
+    <div class="admin-sidebar">
+      <div class="admin-header">
+        <h1>Quản trị viên</h1>
+        <span class="user-name" id="adminName"></span>
+      </div>
+      <div class="user-list" id="adminUserList"></div>
+    </div>
+
+    <div class="chat-area">
+      <div class="chat-header">
+        <h2 id="chatTitle">Chọn một khách hàng để tư vấn</h2>
+        <div class="chat-controls">
+          <select class="partner-select" id="partnerSelect" hidden></select>
+          <button class="chat-btn" id="connectPartnerBtn" hidden type="button">Kết nối Partner</button>
+          <button class="chat-btn" id="logoutBtn" type="button">Đăng xuất</button>
+        </div>
+      </div>
+      <div class="messages-area" id="messagesArea">
+        <div class="no-partner" id="emptyChatHint">Chưa chọn cuộc trò chuyện</div>
+      </div>
+      <div class="attach-chip" id="attachChip"></div>
+      <div class="input-area">
+        <button class="attach-btn" id="attachBtn" type="button" title="Gửi ảnh / tài liệu" disabled>+</button>
+        <input type="file" id="attachInput" hidden accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx">
+        <input class="input-field" id="msgInput" type="text" placeholder="Nhập tin nhắn..." autocomplete="off" disabled>
+        <button class="input-btn" id="sendBtn" disabled>Gửi</button>
+      </div>
+      <div class="socket-status" id="socketStatus" hidden></div>
+    </div>
+  </div>
+
+  <script src="/ws/socket.io.js"></script>
+  <script src="/js/common.js"></script>
+  <script src="/js/admin.js"></script>
+</body>
+</html>

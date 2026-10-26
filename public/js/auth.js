@@ -1,38 +1,62 @@
-// Client-side helpers for login/logout/register
-window.apiBase = '/api';
+// Trang đăng nhập / đăng ký
+document.addEventListener('DOMContentLoaded', () => {
+  const loginForm = document.getElementById('loginForm');
+  const registerForm = document.getElementById('registerForm');
+  const tabLogin = document.getElementById('tabLogin');
+  const tabRegister = document.getElementById('tabRegister');
+  const errorBox = document.getElementById('authError');
 
-window.attemptLogin = async function(username, password) {
-  const resp = await fetch(`${window.apiBase}/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password })
+  // Đã đăng nhập thì vào thẳng trang của role
+  api('/me').then(({ data }) => {
+    if (data && data.success) window.location.href = homeFor(data.user.role);
   });
-  const data = await resp.json();
-  if (data.success) {
-    localStorage.setItem('sessionId', data.user.id);
-    window.location.href = data.user.role === 'admin' ? '/admin' :
-                          data.user.role === 'partner' ? '/partner' : '/chat';
-  } else {
-    alert(data.error || 'Đăng nhập thất bại');
-  }
-};
 
-window.attemptRegister = async function(username, password, displayName) {
-  const resp = await fetch(`${window.apiBase}/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password, display_name: displayName })
+  function showError(msg) {
+    errorBox.textContent = msg;
+    errorBox.hidden = false;
+  }
+  function switchTab(showRegister) {
+    tabLogin.classList.toggle('active', !showRegister);
+    tabRegister.classList.toggle('active', showRegister);
+    loginForm.hidden = showRegister;
+    registerForm.hidden = !showRegister;
+    errorBox.hidden = true;
+  }
+  tabLogin.addEventListener('click', () => switchTab(false));
+  tabRegister.addEventListener('click', () => switchTab(true));
+
+  loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const { data } = await api('/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: document.getElementById('loginUsername').value.trim(),
+        password: document.getElementById('loginPassword').value,
+      }),
+    });
+    if (data && data.success) {
+      saveSession(data.sessionId);
+      window.location.href = homeFor(data.user.role);
+    } else {
+      showError((data && data.error) || 'Đăng nhập thất bại');
+    }
   });
-  const data = await resp.json();
-  if (data.success) {
-    alert('Đăng ký thành công! Bạn có thể đăng nhập ngay.');
-  } else {
-    alert(data.error || 'Đăng ký thất bại');
-  }
-};
 
-window.doLogout = async function() {
-  await fetch(`${window.apiBase}/logout`, { method: 'POST' });
-  localStorage.removeItem('sessionId');
-  window.location.href = '/';
-};
+  registerForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const { data } = await api('/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: document.getElementById('regUsername').value.trim(),
+        password: document.getElementById('regPassword').value,
+        display_name: document.getElementById('regDisplayName').value.trim(),
+      }),
+    });
+    if (data && data.success) {
+      switchTab(false);
+      alert('Đăng ký thành công! Bạn có thể đăng nhập ngay.');
+    } else {
+      showError((data && data.error) || 'Đăng ký thất bại');
+    }
+  });
+});

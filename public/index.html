@@ -3,62 +3,40 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Trang tư vấn nông nghiệp</title>
+  <title>Tư vấn Nông nghiệp - Đăng nhập</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <div id="root">
-    <!-- Screens sẽ thay đổi theo role qua JavaScript -->
-    <div id="login-screen">
-      <div class="admin-sidebar" style="display:none;">
-        <div class="admin-header">
-          <h1>Quản trị viên</h1>
-          <span class="user-name" id="adminName"></span>
-        </div>
-        <div class="user-list" id="adminUserList">
-          <!-- Động tạo bằng JS -->
-        </div>
-      </div>
-      <div class="chat-area" style="display:none;">
-        <div class="chat-header">
-          <h2>Khung chat</h2>
-          <div class="chat-controls">
-            <button class="chat-btn" id="connectPartnerBtn">Kết nối partner</button>
-          </div>
-        </div>
-        <div class="messages-area" id="messagesArea">
-          <!-- Động tạo -->
-        </div>
-        <div class="input-area">
-          <input class="input-field" id="msgInput" type="text" placeholder="Nhập tin nhắn..." disabled>
-          <button class="input-btn" id="sendBtn" disabled>Gửi</button>
-        </div>
-      </div>
-      <div class="connect-partner" id="connectPartnerDesktopBtn">Kết nối partner</div>
-    </div>
+  <div class="login-body">
+    <div class="login-card">
+      <h1>Tư vấn Nông nghiệp</h1>
+      <p class="login-sub">Chat trực tiếp với chuyên gia, kết nối đơn vị đồng hành</p>
 
-    <div id="partner-screen" style="display:none;">
-      <div class="partner-sidebar">
-        <div class="partner-header">
-          <h1>Lộ trình tư vấn</h1>
-          <span class="user-name" id="partnerUserName"></span>
-        </div>
-        <div class="partner-list" id="partnerList">
-          <!-- Khách gán cho partner -->
-        </div>
+      <div class="tabs">
+        <button class="tab active" id="tabLogin" type="button">Đăng nhập</button>
+        <button class="tab" id="tabRegister" type="button">Đăng ký</button>
       </div>
-      <div class="chat-view">
-        <div class="partner-messages" id="partnerMessages">
-          <!-- Đọc-only lịch sử -->
-          <div class="no-partner" id="noPartnerMsg">Chưa có khách gán</div>
-        </div>
-      </div>
+
+      <form id="loginForm">
+        <input class="form-field" type="text" id="loginUsername" placeholder="Tên đăng nhập" autocomplete="username" required>
+        <input class="form-field" type="password" id="loginPassword" placeholder="Mật khẩu" autocomplete="current-password" required>
+        <button class="btn-primary" type="submit">Đăng nhập</button>
+      </form>
+
+      <form id="registerForm" hidden>
+        <input class="form-field" type="text" id="regDisplayName" placeholder="Họ và tên" required>
+        <input class="form-field" type="text" id="regUsername" placeholder="Tên đăng nhập" autocomplete="username" required>
+        <input class="form-field" type="password" id="regPassword" placeholder="Mật khẩu" autocomplete="new-password" required>
+        <button class="btn-primary" type="submit">Đăng ký</button>
+      </form>
+
+      <div class="auth-error" id="authError" hidden></div>
+
+      <p class="login-hint">Tài khoản test: admin/admin123 · partner1/admin123 · user1/user123</p>
     </div>
   </div>
 
+  <script src="/js/common.js"></script>
   <script src="/js/auth.js"></script>
-  <script src="/js/chat.js"></script>
-  <script src="/js/admin.js"></script>
-  <script src="/js/partner.js"></script>
 </body>
 </html>

@@ -40,6 +40,7 @@ body {
 .user-name { font-weight: 500; font-size: 0.9rem; }
 .user-last-msg { font-size: 0.75rem; color: #666; margin-top: 2px; }
 .user-unread { background: var(--color-accent); color: #fff; width: 18px; height: 18px; border-radius: 50%; font-size: 0.65rem; display: inline-flex; align-items: center; justify-content: center; margin-left: 0.5rem; }
+.user-unread[hidden] { display: none; }
 .user-preview { font-size: 0.75rem; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 120px; }
 
 .connect-partner { width: 100%; padding: 0.5rem 1rem; margin-top: 0.5rem; background: #f0f2f5; border: 1px solid var(--color-border); border-radius: 20px; font-size: 0.85rem; cursor: pointer; text-align: center; }
@@ -83,6 +84,41 @@ body {
 .partner-message.user { background: var(--color-accent); color: #fff; }
 .partner-message-time { font-size: 0.65rem; opacity: 0.7; margin-top: 2px; text-align: right; }
 .no-partner { padding: 2rem; text-align: center; color: #666; font-size: 0.9rem; }
+
+/* --- Đăng nhập / Đăng ký --- */
+.login-body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f0f2f5; }
+.login-card { width: 360px; background: #fff; border: 1px solid var(--color-border); border-radius: 12px; padding: 1.5rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.login-card h1 { font-size: 1.3rem; text-align: center; }
+.login-sub { font-size: 0.85rem; color: #666; text-align: center; }
+.login-hint { font-size: 0.75rem; color: #888; text-align: center; }
+.tabs { display: flex; gap: 0.5rem; border-bottom: 1px solid var(--color-border); }
+.tab { padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; font-size: 0.9rem; color: #666; border-bottom: 2px solid transparent; }
+.tab.active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
+#loginForm, #registerForm { display: flex; flex-direction: column; gap: 0.6rem; }
+.form-field { padding: 0.5rem 0.6rem; border: 1px solid var(--color-border); border-radius: 8px; font-size: 0.9rem; }
+.form-field:focus { outline: none; border-color: var(--color-accent); }
+.btn-primary { padding: 0.6rem; background: var(--color-accent); color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
+.btn-primary:hover { background: #ca1a4a; }
+.auth-error { color: #c00; font-size: 0.85rem; text-align: center; }
+
+/* --- Tiện ích chat: đính kèm, trạng thái socket, partner --- */
+.partner-chip { font-size: 0.75rem; color: #2e7d32; align-self: center; }
+.partner-select { padding: 0.3rem 0.5rem; border: 1px solid var(--color-border); border-radius: 8px; font-size: 0.8rem; }
+.attach-btn { width: 32px; height: 32px; flex-shrink: 0; border: 1px solid var(--color-border); background: #fff; border-radius: 50%; font-size: 1.1rem; cursor: pointer; color: #555; }
+.attach-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
+.attach-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.attach-chip { padding: 0 1rem; font-size: 0.75rem; color: #555; min-height: 0.5rem; }
+.socket-status { padding: 0.4rem 1rem; background: #fff3cd; color: #7a5c00; font-size: 0.8rem; text-align: center; }
+
+.message-sender, .partner-message-sender { font-size: 0.7rem; opacity: 0.75; margin-bottom: 2px; }
+.message-img, .partner-message-img { max-width: 220px; border-radius: 8px; display: block; margin-top: 0.3rem; }
+.message-file, .partner-message-file { display: inline-block; margin-top: 0.3rem; font-size: 0.8rem; }
+.message.admin .message-file { color: var(--color-accent); }
+
+/* --- Partner view full-height --- */
+.chat-view { display: flex; flex-direction: column; }
+.partner-messages { flex: 1; }
+.partner-logout { margin: 0.75rem; }
 
 @media (max-width: 480px) {
   .admin-sidebar, .partner-sidebar { width: 100%; height: auto; }
