@@ -193,14 +193,28 @@ async function main() {
     await typingOffP;
     check('relay typing: isTyping=false truyền sang client đối diện', true);
 
-    // 🔍 probe: typing không kèm convId → server bỏ qua, không broadcast
-    let stray = false;
-    const strayHandler = () => { stray = true; };
-    userSock.on('typing', strayHandler);
+    // 🔍 probe: typing không hợp lệ → server bỏ qua, không broadcast
+    let typingHits = 0;
+    const typingCounter = () => { typingHits += 1; };
+    userSock.on('typing', typingCounter);
+
     adminSock.emit('typing', { convId: 0, isTyping: true });
-    await new Promise((r) => setTimeout(r, 500));
-    userSock.off('typing', strayHandler);
-    check('🔍 typing convId=0 → bị bỏ qua (không broadcast rỗng)', stray === false, `stray=${stray}`);
+    adminSock.emit('typing', { isTyping: true });
+    await new Promise((r) => setTimeout(r, 400));
+    check('🔍 typing convId thiếu/0 → bị bỏ qua', typingHits === 0, `hits=${typingHits}`);
+
+    adminSock.emit('typing', { convId, isTyping: true });
+    adminSock.emit('typing', { convId, isTyping: true });
+    adminSock.emit('typing', { convId, isTyping: true });
+    await new Promise((r) => setTimeout(r, 400));
+    check('🔍 spam cùng trạng thái typing → chỉ relay 1 lần', typingHits === 1, `hits=${typingHits}`);
+
+    const outsiderSock = connectSocket(admin.sessionId); // socket này chưa join conversation
+    outsiderSock.emit('typing', { convId, isTyping: false });
+    await new Promise((r) => setTimeout(r, 400));
+    check('🔍 socket chưa join phòng → không phát được typing vào phòng', typingHits === 1, `hits=${typingHits}`);
+    outsiderSock.close();
+    userSock.off('typing', typingCounter);
 
     const noRightP = waitEvent(userSock, 'error');
     userSock.emit('message', { convId: 999999, content: 'hack' });

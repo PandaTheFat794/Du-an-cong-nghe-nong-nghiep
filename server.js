@@ -168,15 +168,17 @@ io.on('connection', (socket) => {
     io.to('admins').emit('badge-cleared', { convId: Number(convId) });
   });
 
-  // Typing indicator: relay tới những người khác trong phòng (socket.to tự loại sender)
+  // Typing indicator: relay tới những người khác trong phòng (socket.to tự loại sender).
+  // Chỉ nhận khi socket đã join phòng và khi trạng thái đổi → client gõ liên tục không
+  // biến thành bão broadcast (typing không đi qua rate-limit của 'message').
+  let typingActive = false;
   socket.on('typing', ({ convId, isTyping }) => {
-    if (!user || !convId) return;
-    socket.to(`conv_${Number(convId)}`).emit('typing', {
-      convId: Number(convId),
-      userId: user.id,
-      name: user.display_name,
-      isTyping: !!isTyping,
-    });
+    const id = Number(convId);
+    const on = !!isTyping;
+    const room = `conv_${id}`;
+    if (!user || !id || !socket.rooms.has(room) || on === typingActive) return;
+    typingActive = on;
+    socket.to(room).emit('typing', { convId: id, userId: user.id, name: user.display_name, isTyping: on });
   });
 });
 
