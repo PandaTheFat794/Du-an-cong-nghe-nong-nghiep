@@ -4,3 +4,4 @@ public/uploads/
 .verify/
 .qoder/
 *.log
+.env
