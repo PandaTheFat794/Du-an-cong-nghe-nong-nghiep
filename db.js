@@ -76,6 +76,27 @@ db.exec(`
 // Index phủ truy vấn lịch sử + phân trang (WHERE conversation_id = ? AND id </> ?)
 db.exec('CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id, id);');
 
+// Bảng process_entries: nhật ký canh tác do khách hàng tự ghi (ngày thực hiện,
+// hoạt động, phương pháp, chi tiết, ảnh/tài liệu đính kèm).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS process_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    activity TEXT NOT NULL,
+    performed_at TEXT NOT NULL,
+    title TEXT NOT NULL,
+    method TEXT,
+    details TEXT,
+    attachment_url TEXT,
+    attachment_name TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+`);
+db.exec(
+  'CREATE INDEX IF NOT EXISTS idx_process_entries_user ON process_entries(user_id, performed_at DESC, id DESC);'
+);
+
 // Seed tài khoản mặc định nếu DB rỗng (chạy 1 lần đầu)
 const existingAdmin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
 if (!existingAdmin) {
@@ -144,6 +165,20 @@ const statements = {
      LEFT JOIN users p ON c.partner_id = p.id
      WHERE c.id = ?`
   ),
+  getProcessEntries: db.prepare(
+    `SELECT id, user_id AS userId, activity, performed_at AS performedAt, title, method, details,
+            attachment_url AS attachmentUrl, attachment_name AS attachmentName, created_at AS createdAt
+     FROM process_entries WHERE user_id = ?
+     ORDER BY performed_at DESC, id DESC LIMIT 200`
+  ),
+  getProcessEntry: db.prepare('SELECT * FROM process_entries WHERE id = ?'),
+  insertProcessEntry: db.prepare(
+    `INSERT INTO process_entries
+       (user_id, activity, performed_at, title, method, details, attachment_url, attachment_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ),
+  deleteProcessEntry: db.prepare('DELETE FROM process_entries WHERE id = ?'),
+  getUserById: db.prepare('SELECT id, username, display_name, role FROM users WHERE id = ?'),
 };
 
 module.exports = {
@@ -187,4 +222,27 @@ module.exports = {
 
   // Conversation kèm tên user + partner (nếu có)
   getConversation: (convId) => statements.getConversation.get(convId),
+
+  // ===== Nhật ký canh tác =====
+  getProcessEntries: (userId) => statements.getProcessEntries.all(userId),
+
+  getProcessEntry: (id) => statements.getProcessEntry.get(id),
+
+  insertProcessEntry: (userId, entry) => {
+    const info = statements.insertProcessEntry.run(
+      userId,
+      entry.activity,
+      entry.performedAt,
+      entry.title,
+      entry.method || null,
+      entry.details || null,
+      entry.attachmentUrl || null,
+      entry.attachmentName || null
+    );
+    return statements.getProcessEntry.get(info.lastInsertRowid);
+  },
+
+  deleteProcessEntry: (id) => statements.deleteProcessEntry.run(id),
+
+  getUserById: (id) => statements.getUserById.get(id),
 };

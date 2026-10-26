@@ -157,6 +157,70 @@ async function main() {
   r = await httpJson(`/api/conversations/${convId}/messages`, { cookie: partner.cookie });
   check('partner chưa được gán → xem history bị 403', r.status === 403, `status ${r.status}`);
 
+  // ===== 2b. Nhật ký canh tác: CRUD + phân quyền =====
+  r = await httpJson('/api/process', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: {
+      activity: 'sowing',
+      performed_at: '2026-01-05',
+      title: 'Gieo lúa vụ đông',
+      method: 'Sạ hàng',
+      details: 'Giống ST25, mật độ 100kg/ha',
+    },
+  });
+  check('user tạo mục nhật ký canh tác → 201', r.status === 201 && r.data.entry.activity === 'sowing', JSON.stringify(r.data));
+  const firstEntryId = r.data && r.data.entry && r.data.entry.id;
+
+  r = await httpJson('/api/process', { cookie: user.cookie });
+  check('user xem nhật ký của mình', r.status === 200 && r.data.entries.some((e) => e.id === firstEntryId), `status ${r.status}`);
+
+  r = await httpJson(`/api/process?userId=${user.user.id}`, { cookie: admin.cookie });
+  check('admin xem nhật ký của khách', r.status === 200 && r.data.entries.length >= 1, `status ${r.status}`);
+
+  r = await httpJson(`/api/process?userId=${user.user.id}`, { cookie: partner.cookie });
+  check('partner chưa được gán → xem nhật ký bị 403', r.status === 403, `status ${r.status}`);
+
+  r = await httpJson('/api/process', {
+    method: 'POST',
+    cookie: admin.cookie,
+    body: { activity: 'watering', performed_at: '2026-01-06', title: 'Admin tạo hộ' },
+  });
+  check('admin không được tạo nhật ký thay khách → 403', r.status === 403, `status ${r.status}`);
+
+  r = await httpJson('/api/process', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { activity: 'hack', performed_at: '2026-01-06', title: 'Hoạt động lạ' },
+  });
+  check('🔍 nhật ký activity lạ → 400', r.status === 400, `status ${r.status}`);
+
+  r = await httpJson('/api/process', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { activity: 'watering', performed_at: '2026-02-31', title: 'Ngày không tồn tại' },
+  });
+  check('🔍 nhật ký ngày không hợp lệ (31/02) → 400', r.status === 400, `status ${r.status}`);
+
+  r = await httpJson('/api/process', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { activity: 'watering', performed_at: '2026-01-06', title: '   ' },
+  });
+  check('🔍 nhật ký tiêu đề rỗng → 400', r.status === 400, `status ${r.status}`);
+
+  r = await httpJson('/api/process', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: {
+      activity: 'watering',
+      performed_at: '2026-01-06',
+      title: 'Đính kèm lạ',
+      attachment: { url: '/uploads/../../etc/passwd', name: 'x.png' },
+    },
+  });
+  check('🔍 nhật ký đính kèm path traversal → 400', r.status === 400, `status ${r.status}`);
+
   // ===== 3. Socket realtime + phân quyền =====
   const userSock = connectSocket(user.sessionId);
   const adminSock = connectSocket(admin.sessionId);
@@ -269,12 +333,14 @@ async function main() {
   }
 
   // ===== 4. Upload =====
+  let uploadedUrl = null;
   r = await httpJson('/api/upload', { method: 'POST', formData: (() => {
     const fd = new FormData();
     fd.append('file', new Blob([PNG_1PX], { type: 'image/png' }), 'anh.png');
     return fd;
   })(), cookie: user.cookie });
   check('upload ảnh .png → 201 + url', r.status === 201 && /^\/uploads\//.test(r.data.url), JSON.stringify(r.data));
+  if (r.status === 201) uploadedUrl = r.data.url;
 
   if (r.status === 201) {
     const fileResp = await fetch(BASE + r.data.url);
@@ -290,6 +356,23 @@ async function main() {
     uSock2.close();
   }
 
+  r = await httpJson('/api/process', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: {
+      activity: 'watering',
+      performed_at: '2026-01-07',
+      title: 'Tưới đợt 1',
+      method: 'Tưới nhỏ giọt 20 phút',
+      details: 'Độ ẩm đất 65%',
+      attachment: { url: uploadedUrl, name: 'anh.png' },
+    },
+  });
+  check('nhật ký kèm ảnh đã upload → 201 + attachmentUrl',
+    r.status === 201 && r.data.entry.attachmentUrl === uploadedUrl,
+    JSON.stringify(r.data));
+  const photoEntryId = r.data && r.data.entry && r.data.entry.id;
+
   r = await httpJson('/api/upload', { method: 'POST', formData: (() => {
     const fd = new FormData();
     fd.append('file', new Blob([Buffer.from('not ok')], { type: 'application/octet-stream' }), 'hack.exe');
@@ -297,7 +380,7 @@ async function main() {
   })(), cookie: user.cookie });
   check('upload .exe → 400 bị chặn', r.status === 400, `status ${r.status}`);
 
-  // ===== 5. Partner read-only =====
+  // ===== 5. Partner: xem nhật ký + chat 3 bên =====
   const partners = await httpJson('/api/admin/partners', { cookie: admin.cookie });
   const partnerRow = partners.data.partners.find((p) => p.username === 'partner1');
   r = await httpJson(`/api/admin/conversations/${convId}/connect`, { method: 'POST', body: { partner_id: partnerRow.id }, cookie: admin.cookie });
@@ -305,22 +388,90 @@ async function main() {
 
   r = await httpJson('/api/partner/conversations', { cookie: partner.cookie });
   const myConv = r.data.conversations.find((c) => c.conversation_id === convId);
-  check('partner thấy khách được gán trong list', r.status === 200 && !!myConv, JSON.stringify(r.data));
+  check('partner thấy khách được gán trong list (kèm số nhật ký)',
+    r.status === 200 && !!myConv && myConv.process_count >= 2,
+    JSON.stringify(myConv));
 
   r = await httpJson(`/api/conversations/${convId}/messages`, { cookie: partner.cookie });
-  check('partner xem được lịch sử (read)', r.status === 200 && r.data.messages.length >= 2, `messages ${r.data.messages && r.data.messages.length}`);
+  check('partner xem được lịch sử chat', r.status === 200 && r.data.messages.length >= 2, `messages ${r.data.messages && r.data.messages.length}`);
+
+  r = await httpJson(`/api/process?userId=${user.user.id}`, { cookie: partner.cookie });
+  check('partner được gán → xem nhật ký canh tác của khách',
+    r.status === 200 && r.data.entries.length >= 2, `status ${r.status}`);
+
+  r = await httpJson('/api/process', {
+    method: 'POST',
+    cookie: partner.cookie,
+    body: { activity: 'watering', performed_at: '2026-01-08', title: 'Partner ghi hộ' },
+  });
+  check('partner không được tạo nhật ký thay khách → 403', r.status === 403, `status ${r.status}`);
+
+  r = await httpJson(`/api/process/${firstEntryId}`, { method: 'DELETE', cookie: partner.cookie });
+  check('partner không được xóa nhật ký → 403', r.status === 403, `status ${r.status}`);
 
   const partnerSock = connectSocket(partner.sessionId);
+  const userSock3 = connectSocket(user.sessionId);
+  const adminSock3 = connectSocket(admin.sessionId);
   try {
     partnerSock.emit('join', { convId });
     await waitEvent(partnerSock, 'joined', (d) => d.convId === convId);
     check('partner join room để xem realtime', true);
-    const errP = waitEvent(partnerSock, 'error');
-    partnerSock.emit('message', { convId, content: 'partner gửi lén' });
-    const perr = await errP;
-    check('partner gửi tin → bị chặn (chỉ đọc)', /quyền/i.test(perr.message), perr.message);
+
+    // Chat 3 bên: partner gửi tin → user, admin và chính partner đều nhận
+    userSock3.emit('join', { convId });
+    await waitEvent(userSock3, 'joined', (d) => d.convId === convId);
+    const beforeUnread = await httpJson('/api/admin/users', { cookie: admin.cookie });
+    const unreadBefore = beforeUnread.data.users.find((u) => u.conversation_id === convId).unread_count;
+
+    const partnerEchoP = waitEvent(partnerSock, 'message', (m) => m.clientId === 'partner-1');
+    const userGotPartnerP = waitEvent(userSock3, 'message', (m) => m.senderRole === 'partner');
+    const adminSideP = waitEvent(adminSock3, 'user-message', (d) => d.convId === convId && d.senderRole === 'partner');
+    partnerSock.emit('message', { convId, content: 'Partner tư vấn cùng anh', clientId: 'partner-1' });
+    const [pEcho, pToUser] = await Promise.all([partnerEchoP, userGotPartnerP]);
+    await adminSideP;
+    check('partner gửi tin → echo về partner + user nhận realtime',
+      pEcho.senderRole === 'partner' && pToUser.senderId === partner.user.id && pToUser.content === 'Partner tư vấn cùng anh',
+      JSON.stringify({ role: pEcho.senderRole, content: pToUser.content }));
+    check('admin nhận user-message khi partner gửi (sidebar refresh)', true);
+
+    const afterUnread = await httpJson('/api/admin/users', { cookie: admin.cookie });
+    const unreadAfter = afterUnread.data.users.find((u) => u.conversation_id === convId).unread_count;
+    check('🔍 tin partner không làm tăng badge unread của admin',
+      unreadAfter === unreadBefore, `before=${unreadBefore}, after=${unreadAfter}`);
+
+    // Nhật ký mới → partner (đang trong room) + admin nhận process-updated
+    const partnerProcP = waitEvent(partnerSock, 'process-updated', (d) => d.action === 'created' && d.userId === user.user.id);
+    const adminProcP = waitEvent(adminSock3, 'process-updated', (d) => d.action === 'created' && d.userId === user.user.id);
+    r = await httpJson('/api/process', {
+      method: 'POST',
+      cookie: user.cookie,
+      body: {
+        activity: 'fertilizing',
+        performed_at: '2026-01-09',
+        title: 'Bón lót đợt 2',
+        method: 'Bón vãi',
+        details: 'NPK 20-20-15, 150kg/ha',
+      },
+    });
+    const updatedEntryId = r.data && r.data.entry && r.data.entry.id;
+    const [procEvtPartner, procEvtAdmin] = await Promise.all([partnerProcP, adminProcP]);
+    check('⚡ khách cập nhật nhật ký → partner + admin nhận process-updated realtime',
+      procEvtPartner.convId === convId && procEvtAdmin.userName === 'Khách E2E',
+      JSON.stringify(procEvtPartner));
+
+    r = await httpJson(`/api/process/${photoEntryId}`, { method: 'DELETE', cookie: admin.cookie });
+    check('admin xóa mục nhật ký → 200', r.status === 200 && r.data.success, JSON.stringify(r.data));
+
+    r = await httpJson('/api/process', { method: 'GET', cookie: user.cookie });
+    check('sau khi admin xóa → nhật ký không còn mục đó',
+      !r.data.entries.some((e) => e.id === photoEntryId), JSON.stringify(r.data.entries.map((e) => e.id)));
+
+    r = await httpJson(`/api/process/${updatedEntryId}`, { method: 'DELETE', cookie: user.cookie });
+    check('user tự xóa nhật ký của mình → 200', r.status === 200 && r.data.success, JSON.stringify(r.data));
   } finally {
     partnerSock.close();
+    userSock3.close();
+    adminSock3.close();
   }
 
   // ===== 6. Rate-limit, upload giả mạo, đổi mật khẩu, xóa tài khoản =====

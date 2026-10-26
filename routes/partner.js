@@ -10,7 +10,8 @@ const { db } = require('../db');
 router.get('/conversations', requireAuth, requireRole('partner'), (req, res) => {
   const conversations = db.prepare(
     `SELECT c.id AS conversation_id, u.id AS user_id, u.display_name AS user_name,
-            (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count
+            (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS message_count,
+            (SELECT COUNT(*) FROM process_entries pe WHERE pe.user_id = u.id) AS process_count
      FROM conversations c
      JOIN users u ON c.user_id = u.id
      WHERE c.partner_id = ?

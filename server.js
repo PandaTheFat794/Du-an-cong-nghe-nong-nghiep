@@ -11,6 +11,7 @@ const authRoutes = require('./routes/auth');
 const chatRoutes = require('./routes/chat');
 const adminRoutes = require('./routes/admin');
 const partnerRoutes = require('./routes/partner');
+const processRoutes = require('./routes/process');
 const uploadRoutes = require('./routes/upload');
 
 const app = express();
@@ -31,6 +32,8 @@ app.use(
 
 // === Socket.io (handshake mang ?sessionId= để định danh) ===
 const io = new Server(server, { path: '/ws' });
+// Route REST cần phát sự kiện realtime (nhật ký canh tác) lấy io qua req.app
+app.set('io', io);
 
 io.use((socket, next) => {
   const user = getSessionUser(socket.handshake.query.sessionId);
@@ -43,6 +46,7 @@ app.use('/api', authRoutes);
 app.use('/api/conversations', chatRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/partner', partnerRoutes);
+app.use('/api/process', processRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api', (req, res) => res.status(404).json({ error: 'API not found' }));
 
@@ -85,8 +89,11 @@ setInterval(() => {
 }, RATE_WINDOW_MS).unref();
 
 // Hợp đồng sự kiện:
-//   client → server: 'join' {convId}, 'message' {convId, content, attachment?}, 'read' {convId}
-//   server → client: 'joined', 'message', 'unread-badge', 'badge-cleared', 'user-message' (room admins), 'error'
+//   client → server: 'join' {convId}, 'message' {convId, content, attachment?, clientId?},
+//                     'read' {convId}, 'typing' {convId, isTyping}
+//   server → client: 'joined', 'message', 'unread-badge', 'badge-cleared',
+//                     'user-message' (room admins, kèm senderRole), 'typing',
+//                     'process-updated' {userId, userName, convId, action, entryId}, 'error'
 io.on('connection', (socket) => {
   const user = socket.user;
   if (user && user.role === 'admin') socket.join('admins');
@@ -118,10 +125,12 @@ io.on('connection', (socket) => {
     const conversation = getConversation(Number(convId));
     if (!conversation) return socket.emit('error', { message: 'Conversation không tồn tại.' });
 
-    // Chỉ chủ cuộc trò chuyện (user) hoặc admin được gửi; partner chỉ đọc
+    // Chủ cuộc trò chuyện (user), admin, hoặc partner đã được gán đều gửi được tin.
+    // Cả 3 cùng nói chuyện trong một luồng để partner tư vấn chung với admin.
     const isOwner = conversation.user_id === user.id;
     const isAdmin = user.role === 'admin';
-    if (!isOwner && !isAdmin) {
+    const isAssignedPartner = user.role === 'partner' && conversation.partner_id === user.id;
+    if (!isOwner && !isAdmin && !isAssignedPartner) {
       return socket.emit('error', { message: 'Bạn không có quyền gửi tin nhắn vào conversation này.' });
     }
     if (isFlooding(user.id)) {
@@ -152,11 +161,13 @@ io.on('connection', (socket) => {
 
     io.to(`conv_${conversation.id}`).emit('message', payload);
 
-    // Khách gửi tin → báo sidebar admin (badge unread + preview)
+    // Người khác admin gửi tin (khách hoặc partner) → refresh sidebar admin.
+    // Badge unread chỉ đếm tin của chính khách hàng (countUnread), partner không làm tăng badge.
     if (!isAdmin) {
       const unread = countUnread(conversation.id);
       io.to('admins').emit('user-message', {
         convId: conversation.id,
+        senderRole: user.role,
         preview: row.content || `[đính kèm: ${row.attachment_name || 'tệp'}]`,
         createdAt: row.created_at,
       });

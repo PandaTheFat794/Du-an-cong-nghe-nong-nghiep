@@ -114,6 +114,30 @@ async function login(ctx, user, pass, expectPath) {
     await U.waitForTimeout(500);
     assert((await U.locator('.message').count()) === before, '🔍 gửi tin rỗng → không tạo bubble', `count vẫn ${before}`);
 
+    // ===== User tự ghi nhật ký canh tác kèm ảnh =====
+    await U.click('#processBtn');
+    await U.waitForSelector('.process-overlay.open', { timeout: 4000 });
+    await U.click('#processAddToggle');
+    await U.selectOption('#processActivity', 'fertilizing');
+    await U.fill('#processDate', '2026-10-20');
+    await U.fill('#processTitle', 'Bón lót vụ đông');
+    await U.fill('#processMethod', 'Bón vãi');
+    await U.fill('#processDetails', 'NPK 20-20-15, 150kg/ha');
+    await U.setInputFiles('#processAttachInput', FIXTURE_PNG);
+    await U.waitForFunction(() => document.getElementById('processAttachChip').textContent.includes('attach.png'), null, { timeout: 8000 });
+    await U.click('#processSubmitBtn');
+    await U.waitForFunction(
+      () => [...document.querySelectorAll('.process-entry-title')].some((el) => el.textContent.includes('Bón lót')),
+      null, { timeout: 8000 }
+    );
+    assert((await U.locator('.process-entry-media img').count()) >= 1,
+      'user thêm nhật ký kèm ảnh → timeline hiện card + ảnh');
+    await U.waitForTimeout(450); // chờ animation stagger của timeline kết thúc
+    await U.screenshot({ path: SHOT('04-user-nhat-ky.png') });
+    await U.click('#processDrawerClose');
+    await U.waitForSelector('.process-overlay', { state: 'hidden', timeout: 4000 });
+    ok('drawer nhật ký đóng được sau khi lưu');
+
     // ===== Admin vào /admin =====
     const ctxA = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const A = await login(ctxA, 'admin', 'admin123', '/admin');
@@ -169,6 +193,7 @@ async function login(ctx, user, pass, expectPath) {
       () => ok('upload + gửi ảnh: user thấy <img> trong chat realtime'),
       () => bad('user thấy ảnh từ admin', 'không có img')
     );
+    await U.waitForTimeout(350);
     await U.screenshot({ path: SHOT('03-user-nhan-anh.png') });
 
     // ===== Admin gán Partner qua UI =====
@@ -178,22 +203,73 @@ async function login(ctx, user, pass, expectPath) {
     await toastLoc.waitFor({ state: 'visible', timeout: 5000 });
     const status = await toastLoc.innerText();
     assert(/kết nối/i.test(status), 'admin bấm Kết nối Partner → toast xác nhận', status);
+    await A.waitForTimeout(450);
     await A.screenshot({ path: SHOT('04-admin-da-gan-partner.png') });
 
-    // ===== Partner vào /partner (read-only) =====
+    // ===== Admin xem nhật ký canh tác của khách =====
+    await A.click('#processBtn');
+    await A.waitForSelector('.process-overlay.open .process-entry', { timeout: 5000 });
+    const adminProc = await A.locator('.process-entry-title').first().innerText();
+    assert(adminProc.includes('Bón lót'), 'admin mở Nhật ký → thấy mục user vừa ghi', adminProc);
+    await A.waitForTimeout(450);
+    await A.screenshot({ path: SHOT('04b-admin-nhat-ky.png') });
+    await A.click('#processDrawerClose');
+    await A.waitForSelector('.process-overlay', { state: 'hidden', timeout: 4000 });
+
+    // ===== Partner: xem nhật ký canh tác + trò chuyện 3 bên =====
     const ctxP = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const P = await login(ctxP, 'partner1', 'admin123', '/partner');
     ok('partner1 login → redirect /partner', P.url());
     await P.waitForSelector('.partner-item');
     const itemTxt = await P.locator('.partner-item').first().innerText();
-    assert(itemTxt.includes('Khách hàng Test'), 'partner thấy khách được gán', itemTxt);
+    assert(itemTxt.includes('Khách hàng Test') && /nhật ký/i.test(itemTxt), 'partner thấy khách được gán kèm số nhật ký', itemTxt.replace(/\n/g, ' · '));
 
-    await P.click('.partner-item');
-    await P.waitForSelector('.partner-message', { timeout: 5000 });
-    const pCount = await P.locator('.partner-message').count();
-    assert(pCount >= 3, 'partner xem được toàn bộ lịch sử (read-only)', `${pCount} tin`);
-    assert((await P.locator('#msgInput').count()) === 0, 'partner KHÔNG có ô nhập tin (chỉ đọc)', 'msgInput count=0');
-    await P.screenshot({ path: SHOT('05-partner-readonly.png') });
+    await P.waitForSelector('.partner-item.active', { timeout: 5000 });
+    const defaultTab = await P.locator('.view-tab.active').innerText();
+    assert(defaultTab.includes('Nhật ký'), 'partner mặc định mở tab Nhật ký canh tác', defaultTab.trim());
+    await P.waitForSelector('.process-entry', { timeout: 6000 });
+    const partnerProc = await P.locator('.process-entry-title').first().innerText();
+    assert(partnerProc.includes('Bón lót'), 'partner xem được nhật ký khách hàng vừa ghi', partnerProc);
+    assert((await P.locator('.process-entry-media img').count()) >= 1, 'partner thấy ảnh đính kèm trong nhật ký');
+    await P.screenshot({ path: SHOT('05-partner-nhat-ky.png') });
+
+    await P.click('.view-tab[data-view="chat"]');
+    await P.waitForSelector('#chatPane:visible', { timeout: 4000 });
+    await P.waitForSelector('#partnerMessages .message', { timeout: 5000 });
+    const pCount = await P.locator('#partnerMessages .message').count();
+    assert(pCount >= 3, 'partner xem được lịch sử chat trong tab Trò chuyện', `${pCount} tin`);
+    assert(await P.locator('#msgInput').isVisible(), 'partner có ô nhập tin để trao đổi với khách + admin', 'msgInput visible');
+
+    await P.fill('#msgInput', 'Partner đã xem nhật ký, tư vấn thêm nhé');
+    await P.click('#sendBtn');
+    await P.waitForSelector('#partnerMessages .message.user', { timeout: 5000 });
+    ok('partner gửi tin → bubble của partner hiện bên phải');
+
+    try {
+      await P.waitForFunction(
+        () => !document.querySelector('#partnerMessages .message.pending'),
+        null, { timeout: 6000 }
+      );
+      ok('🔍 server echo thay bubble "đang gửi" bằng tin thật');
+    } catch { bad('bubble pending của partner không được thay', 'vẫn còn .message.pending sau 6s'); }
+
+    try {
+      await A.waitForFunction(
+        () => [...document.querySelectorAll('#messagesArea .message.role-partner')].some((el) => el.textContent.includes('tư vấn thêm')),
+        null, { timeout: 6000 }
+      );
+      ok('⚡ admin nhận tin partner realtime (chat 3 bên)');
+    } catch { bad('admin nhận tin partner', 'timeout 6s, không thấy bubble role-partner'); }
+
+    try {
+      await U.waitForFunction(
+        () => [...document.querySelectorAll('#messagesArea .message.role-partner')].some((el) => el.textContent.includes('tư vấn thêm')),
+        null, { timeout: 6000 }
+      );
+      ok('⚡ user nhận tin partner realtime');
+    } catch { bad('user nhận tin partner', 'timeout 6s, không thấy bubble role-partner'); }
+    await P.waitForTimeout(350); // chờ animation msgIn kết thúc trước khi chụp
+    await P.screenshot({ path: SHOT('05b-partner-chat.png') });
 
     // 🔍 probe: partner cố vào /admin → pageGuard đá về login
     await P.goto(BASE + '/admin');
@@ -203,6 +279,7 @@ async function login(ctx, user, pass, expectPath) {
     await U.reload();
     await U.waitForSelector('#partnerChip:visible', { timeout: 6000 });
     ok('user reload → header hiện chip "Đồng hành: Partner Test"', await U.locator('#partnerChip').innerText());
+    await U.waitForTimeout(350);
     await U.screenshot({ path: SHOT('06-user-chip-partner.png') });
 
     // 🔍 probe: register trùng tên qua tab Đăng ký

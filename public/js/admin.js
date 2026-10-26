@@ -16,6 +16,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   const chatTitle = document.getElementById('chatTitle');
   const partnerSelect = document.getElementById('partnerSelect');
   const connectPartnerBtn = document.getElementById('connectPartnerBtn');
+  const processBtn = document.getElementById('processBtn');
+
+  // Drawer nhật ký canh tác (admin xem + xóa, không thêm thay khách)
+  const processDrawer = createProcessDrawer({});
+  processBtn.addEventListener('click', () => {
+    if (selectedUserId) processDrawer.open(selectedUserId, chatTitle.textContent);
+  });
 
   const pager = createHistoryPager(
     messagesArea,
@@ -24,9 +31,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   );
 
   let selectedConvId = null;
+  let selectedUserId = null;
   let partners = [];
   let pendingFile = null;
   let usersReloadTimer = null;
+  let processReloadTimer = null;
 
   function scrollBottom() {
     messagesArea.scrollTop = messagesArea.scrollHeight;
@@ -61,6 +70,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       last.className = 'user-last-msg';
       last.textContent = u.last_message;
       meta.append(name, last);
+      if (u.process_count > 0) {
+        const activity = document.createElement('span');
+        activity.className = 'user-process-count';
+        activity.textContent = `${u.process_count} nhật ký canh tác`;
+        meta.appendChild(activity);
+      }
       info.append(avatarEl(u.display_name, 'user'), meta);
 
       const badge = document.createElement('span');
@@ -82,7 +97,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       actions.append(badge, del);
 
       item.append(info, actions);
-      item.addEventListener('click', () => selectConversation(u.conversation_id, u.display_name));
+      item.addEventListener('click', () => selectConversation(u.conversation_id, u.display_name, u.id));
       list.appendChild(item);
     }
   }
@@ -93,6 +108,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (data && data.success) {
       itemEl.remove();
       if (u.conversation_id === selectedConvId) resetChatArea();
+      if (processDrawer.isOpenFor(u.id)) processDrawer.close();
       toast(`Đã xóa tài khoản ${u.display_name}`, 'success');
     } else {
       toast((data && data.error) || 'Không xóa được tài khoản', 'error');
@@ -101,6 +117,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function resetChatArea() {
     selectedConvId = null;
+    selectedUserId = null;
     typingView.hide();
     pendingSends.clear();
     pager.reset();
@@ -108,6 +125,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     [msgInput, sendBtn, attachBtn].forEach((el) => { el.disabled = true; });
     partnerSelect.hidden = true;
     connectPartnerBtn.hidden = true;
+    processBtn.hidden = true;
     messagesArea.innerHTML = '';
     const hint = document.createElement('div');
     hint.className = 'no-partner';
@@ -124,8 +142,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ===== Chọn cuộc trò chuyện =====
-  async function selectConversation(convId, title) {
+  async function selectConversation(convId, title, userId) {
     selectedConvId = convId;
+    selectedUserId = userId;
     typingView.hide(); // bong bóng "đang gõ" của conversation cũ
     pendingSends.clear(); // bubble tạm của conv cũ sẽ bị innerHTML xoá bên dưới
     document.querySelectorAll('.user-item').forEach((el) => {
@@ -136,6 +155,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     [msgInput, sendBtn, attachBtn].forEach((el) => { el.disabled = false; });
     partnerSelect.hidden = false;
     connectPartnerBtn.hidden = false;
+    processBtn.hidden = false;
 
     socket.emit('join', { convId });
 
@@ -181,7 +201,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     if (data && data.success) {
       toast('Đã kết nối Partner cho khách hàng này.', 'success');
-      selectConversation(selectedConvId, chatTitle.textContent);
+      selectConversation(selectedConvId, chatTitle.textContent, selectedUserId);
     } else {
       toast((data && data.error) || 'Không gán được Partner', 'error');
     }
@@ -218,6 +238,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (convId !== selectedConvId) setBadge(convId, count);
   });
   socket.on('badge-cleared', ({ convId }) => setBadge(convId, 0));
+  socket.on('process-updated', (d) => {
+    if (d.convId === selectedConvId) {
+      if (processDrawer.isOpenFor(d.userId)) {
+        clearTimeout(processReloadTimer);
+        processReloadTimer = setTimeout(() => processDrawer.refresh(), 200);
+      }
+      if (d.action === 'created') {
+        toast(`${d.userName} vừa cập nhật nhật ký canh tác.`, 'info');
+      }
+    }
+    clearTimeout(usersReloadTimer);
+    usersReloadTimer = setTimeout(loadUsers, 400);
+  });
   socket.on('error', (e) => {
     toast(e.message, 'error');
     failAllPending();

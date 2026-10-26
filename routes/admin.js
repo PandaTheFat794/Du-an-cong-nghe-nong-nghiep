@@ -18,7 +18,10 @@ router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
             COALESCE((
               SELECT COUNT(*) FROM messages m
               WHERE m.conversation_id = c.id AND m.id > c.admin_last_read_id AND m.sender_id = c.user_id
-            ), 0) AS unread_count
+            ), 0) AS unread_count,
+            COALESCE((
+              SELECT COUNT(*) FROM process_entries pe WHERE pe.user_id = u.id
+            ), 0) AS process_count
      FROM users u
      LEFT JOIN conversations c ON c.user_id = u.id
      LEFT JOIN messages lm ON lm.id = (SELECT MAX(m2.id) FROM messages m2 WHERE m2.conversation_id = c.id)
@@ -37,6 +40,7 @@ router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
       : 'Chưa có tin nhắn',
     last_message_time: u.last_message_time,
     unread_count: u.unread_count,
+    process_count: u.process_count,
   }));
 
   res.json({ success: true, users });

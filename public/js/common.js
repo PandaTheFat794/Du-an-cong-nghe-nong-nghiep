@@ -61,6 +61,7 @@ function formatTime(value) {
 function messageEl(msg, mine, cssBase = 'message') {
   const div = document.createElement('div');
   div.className = `${cssBase} ${mine ? 'user' : 'admin'}`;
+  if (msg.senderRole) div.classList.add(`role-${msg.senderRole}`);
 
   if (!mine && msg.senderName) {
     const name = document.createElement('div');

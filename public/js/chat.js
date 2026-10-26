@@ -14,6 +14,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   const convId = me.data.conversation_id;
   wireLogout('logoutBtn');
 
+  // Nhật ký canh tác của chính khách hàng (drawer bên phải)
+  const processDrawer = createProcessDrawer({ canAdd: true });
+  document.getElementById('processBtn').addEventListener('click', () => {
+    processDrawer.open(myUser.id, myUser.display_name);
+  });
+  let processRefreshTimer = null;
+
   // 2. Lịch sử tin nhắn (REST, phân trang: nút "Tải tin cũ hơn" khi còn)
   const pager = createHistoryPager(
     messagesArea,
@@ -57,6 +64,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (d.convId !== convId || d.userId === myUser.id) return;
     if (d.isTyping) typingView.show();
     else typingView.hide();
+  });
+  socket.on('process-updated', (d) => {
+    if (d.userId !== myUser.id || !processDrawer.isOpenFor(myUser.id)) return;
+    clearTimeout(processRefreshTimer);
+    processRefreshTimer = setTimeout(() => processDrawer.refresh(), 200);
   });
   socket.on('error', (e) => {
     toast(e.message, 'error');
