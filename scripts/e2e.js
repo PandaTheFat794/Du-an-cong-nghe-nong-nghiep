@@ -105,6 +105,7 @@ function startServer({ port = PORT, dbPath = DB_PATH, env = {} } = {}) {
         SESSION_SECRET: 'e2e-secret',
         LLM_PROVIDER: 'off',
         LLM_FALLBACK_PROVIDER: 'off',
+        LLM_FALLBACK2_PROVIDER: 'off',
         OFFICE_HOURS: '0-24',
         UPLOAD_CLEANUP_INTERVAL_HOURS: '0',
         ...env,
@@ -1052,6 +1053,59 @@ async function main() {
     } finally {
       replyCache.clear();
       mock.close();
+    }
+  }
+
+  // ===== 5f2. Fallback bậc 2 (LLM_FALLBACK2_*): chính + fallback lỗi → vẫn trả lời =====
+  {
+    const bad = http.createServer((req, res) => {
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end('{"error":{"message":"mock down"}}');
+    });
+    await new Promise((resolve) => bad.listen(0, '127.0.0.1', resolve));
+    let goodHits = 0;
+    const good = http.createServer((req, res) => {
+      goodHits += 1;
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write('data: {"choices":[{"delta":{"content":"Fallback 2 trả lời "}}]}\n\n');
+      res.write('data: {"choices":[{"delta":{"content":"thành công."}}]}\n\n');
+      res.end('data: [DONE]\n\n');
+    });
+    await new Promise((resolve) => good.listen(0, '127.0.0.1', resolve));
+    const badBase = `http://127.0.0.1:${bad.address().port}`;
+    process.env.LLM_PROVIDER = 'openai';
+    process.env.LLM_API_KEY = 'test-key';
+    process.env.LLM_MODEL = 'mock-model';
+    process.env.LLM_BASE_URL = badBase;
+    process.env.LLM_FALLBACK_PROVIDER = 'openai';
+    process.env.LLM_FALLBACK_API_KEY = 'test-key';
+    process.env.LLM_FALLBACK_MODEL = 'mock-model';
+    process.env.LLM_FALLBACK_BASE_URL = badBase;
+    process.env.LLM_FALLBACK2_PROVIDER = 'openai';
+    process.env.LLM_FALLBACK2_API_KEY = 'test-key';
+    process.env.LLM_FALLBACK2_MODEL = 'mock-model';
+    process.env.LLM_FALLBACK2_BASE_URL = `http://127.0.0.1:${good.address().port}`;
+    delete require.cache[require.resolve('../bot')];
+    const bot2 = require('../bot');
+    const cache2 = require('../reply-cache');
+    cache2.clear();
+    try {
+      let resets = 0;
+      let chunks = '';
+      const reply = await bot2.generateReply(
+        [{ senderRole: 'user', content: 'kiểm tra fallback bậc hai' }],
+        (d) => { chunks += d; },
+        () => { resets += 1; },
+      );
+      check('🔍 fallback bậc 2: chính + fallback lỗi → API dự phòng 2 vẫn trả lời',
+        reply.via === 'llm' && reply.used === 'fallback2' && goodHits === 1
+          && chunks.includes('Fallback 2'),
+        JSON.stringify({ via: reply.via, used: reply.used, goodHits }));
+      check('🔍 fallback bậc 2: reset stream trước mỗi lần chuyển API', resets === 2, `resets=${resets}`);
+    } finally {
+      cache2.clear();
+      good.close();
+      bad.close();
     }
   }
 

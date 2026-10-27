@@ -30,7 +30,7 @@ const LLM_FALLBACK_BASE_URL = (process.env.LLM_FALLBACK_BASE_URL || 'https://api
 const LLM_FALLBACK2_PROVIDER = (process.env.LLM_FALLBACK2_PROVIDER || 'off').toLowerCase();
 const LLM_FALLBACK2_API_KEY = process.env.LLM_FALLBACK2_API_KEY || '';
 const LLM_FALLBACK2_MODEL = process.env.LLM_FALLBACK2_MODEL
-  || (LLM_FALLBACK2_PROVIDER === 'openai' ? 'gpt-oss-120b' : 'gemini-3.1-flash-lite');
+  || (LLM_FALLBACK2_PROVIDER === 'openai' ? 'openai/gpt-oss-120b' : 'gemini-3.1-flash-lite');
 const LLM_FALLBACK2_BASE_URL = (process.env.LLM_FALLBACK2_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/+$/, '');
 
 // ===== Giờ hành chính (OFFICE_HOURS env, dạng "8-17", mặc định 8-17) =====
@@ -235,12 +235,12 @@ function cleanReply(text) {
 
 /**
  * Sinh câu trả lời cho tin nhắn mới của khách.
- * Thứ tự: API LLM chính → API LLM fallback (nếu cấu hình) → rule-based.
+ * Thứ tự: API LLM chính → API LLM fallback → API LLM fallback 2 → rule-based.
  * @param {Array} history - các tin gần nhất của thread ({senderRole, content}).
  * @param {(chunk: string) => void} onDelta - nhận từng cụm chữ (stream tới client).
- * @param {() => void} [onFallbackStart] - gọi trước khi chuyển sang API fallback
- *   (để client xóa stream dở dang của API chính).
- * @returns {Promise<{text: string, via: 'llm'|'rules', used?: 'primary'|'fallback'}>}
+ * @param {() => void} [onFallbackStart] - gọi trước khi chuyển sang API kế tiếp
+ *   (để client xóa stream dở dang của API trước).
+ * @returns {Promise<{text: string, via: 'llm'|'rules', used?: 'primary'|'fallback'|'fallback2'}>}
  */
 async function generateReply(history, onDelta, onFallbackStart) {
   const attempts = [];
@@ -249,6 +249,9 @@ async function generateReply(history, onDelta, onFallbackStart) {
   }
   if (LLM_FALLBACK_PROVIDER !== 'off' && LLM_FALLBACK_API_KEY) {
     attempts.push({ name: 'fallback', provider: LLM_FALLBACK_PROVIDER, apiKey: LLM_FALLBACK_API_KEY, model: LLM_FALLBACK_MODEL, baseUrl: LLM_FALLBACK_BASE_URL });
+  }
+  if (LLM_FALLBACK2_PROVIDER !== 'off' && LLM_FALLBACK2_API_KEY) {
+    attempts.push({ name: 'fallback2', provider: LLM_FALLBACK2_PROVIDER, apiKey: LLM_FALLBACK2_API_KEY, model: LLM_FALLBACK2_MODEL, baseUrl: LLM_FALLBACK2_BASE_URL });
   }
 
   const lastUserMsg = [...history].reverse().find((m) => m.senderRole === 'user' && m.content);

@@ -109,11 +109,11 @@ Tài khoản seed (tự tạo khi DB rỗng):
 | `LLM_BASE_URL` | — | Base URL OpenAI-compatible (DeepSeek, Ollama...) |
 | `LLM_FALLBACK_PROVIDER` | `off` | `off` / `gemini` / `openai` — API dự phòng khi LLM chính lỗi/quá tải/timeout |
 | `LLM_FALLBACK_API_KEY` | — | Key của API dự phòng (ví dụ Groq: https://console.groq.com/keys) |
-| `LLM_FALLBACK_MODEL` | theo provider | Model fallback (ví dụ `gpt-oss-120b` của Groq) |
+| `LLM_FALLBACK_MODEL` | theo provider | Model fallback (ví dụ `openai/gpt-oss-120b` của Groq) |
 | `LLM_FALLBACK_BASE_URL` | — | Base URL fallback (ví dụ `https://api.groq.com/openai/v1`) |
 | `LLM_FALLBACK2_PROVIDER` | `off` | Bậc dự phòng thứ 2 (cùng định dạng với bậc 1) |
 | `LLM_FALLBACK2_API_KEY` | — | Key của bậc 2 |
-| `LLM_FALLBACK2_MODEL` | theo provider | Model bậc 2 (mặc định `gpt-oss-120b` cho Groq) |
+| `LLM_FALLBACK2_MODEL` | theo provider | Model bậc 2 (mặc định `openai/gpt-oss-120b` cho Groq) |
 | `LLM_FALLBACK2_BASE_URL` | `https://api.groq.com/openai/v1` | Base URL bậc 2 |
 | `OFFICE_HOURS` | `8-17` | Giờ làm việc của bot, dạng `batdau-ketthuc` (end-exclusive). Ngoài giờ bot trả thông điệp hẹn phản hồi. `0-24` = luôn trong giờ (test) |
 | `UPLOAD_CLEANUP_INTERVAL_HOURS` | `24` | Chu kỳ job dọn file rác trong `public/uploads/` (0 = tắt) |
@@ -156,13 +156,13 @@ Dự án đọc `.env` bằng `dotenv`; biến môi trường trong shell vẫn 
 
 - Chạy offline rule-based: để trống `LLM_API_KEY` (12 chủ đề tiếng Việt).
 - Bật LLM: `LLM_PROVIDER=gemini` (hoặc `openai` + `LLM_BASE_URL`) + `LLM_API_KEY` + `LLM_MODEL`.
-- Dự phòng khi LLM chính lỗi/quá tải: `LLM_FALLBACK_*` (bậc 1) rồi `LLM_FALLBACK2_*` (bậc 2, mặc định Groq `gpt-oss-120b`); hết fallback mới về rule-based.
+- Dự phòng khi LLM chính lỗi/quá tải: `LLM_FALLBACK_*` (bậc 1) rồi `LLM_FALLBACK2_*` (bậc 2, mặc định Groq `openai/gpt-oss-120b`); hết fallback mới về rule-based.
 - `OFFICE_HOURS=8-17` giới hạn giờ bot tư vấn (end-exclusive); ngoài giờ bot trả thông điệp hẹn. `0-24` = luôn trong giờ.
 
 ## Kiểm thử
 
 ```bash
-npm run e2e        # 180 test: REST + socket + upload + nhật ký (nhiều ảnh) + 3 luồng chat + phân trang/tìm kiếm/around + rate-limit + session persist + CSRF + security + stats 7/30/90 ngày + Bot AI (toggle, off-hours, bot-unsure, fallback + cache)
+npm run e2e        # 182 test: REST + socket + upload + nhật ký (nhiều ảnh) + 3 luồng chat + phân trang/tìm kiếm/around + rate-limit + session persist + CSRF + security + stats 7/30/90 ngày + Bot AI (toggle, off-hours, bot-unsure, fallback 1/2 + cache)
 npm run ui-check   # 110 check UI trên Edge/Chrome headless (tự spawn server + DB riêng; ghi âm dùng micro giả; dashboard 7/30 ngày, tìm kiếm chat, lightbox, title unread, Bot AI toggle, read receipt)
 ```
 

@@ -59,7 +59,7 @@ function startServer() {
     if (fs.existsSync(f)) fs.unlinkSync(f);
   }
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-    env: { ...process.env, PORT: String(PORT), DB_PATH, SESSION_SECRET: 'ui-check-secret', NODE_ENV: 'test', LLM_PROVIDER: 'off', LLM_FALLBACK_PROVIDER: 'off', OFFICE_HOURS: '0-24', UPLOAD_CLEANUP_INTERVAL_HOURS: '0' },
+    env: { ...process.env, PORT: String(PORT), DB_PATH, SESSION_SECRET: 'ui-check-secret', NODE_ENV: 'test', LLM_PROVIDER: 'off', LLM_FALLBACK_PROVIDER: 'off', LLM_FALLBACK2_PROVIDER: 'off', OFFICE_HOURS: '0-24', UPLOAD_CLEANUP_INTERVAL_HOURS: '0' },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   child.stderr.pipe(process.stderr);
