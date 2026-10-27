@@ -518,6 +518,13 @@ async function headerOverflow(page) {
     await acctBtn.click();
     await P.waitForSelector('.partner-topbar .account-panel:visible', { timeout: 3000 });
     ok('partner mở panel Tài khoản từ taskbar');
+    await P.waitForTimeout(320);
+    const acctPanelBox = await P.locator('.partner-topbar .account-panel').boundingBox();
+    const panelOnTop = await P.evaluate(({ x, y }) => {
+      const el = document.elementFromPoint(x, y);
+      return !!(el && el.closest('.account-panel'));
+    }, { x: acctPanelBox.x + acctPanelBox.width / 2, y: acctPanelBox.y + acctPanelBox.height - 12 });
+    assert(panelOnTop, '🔍 panel Tài khoản nằm trên cùng, không bị khung chat che');
     await P.click('#partnerChatTitle');
     await P.waitForSelector('.partner-topbar .account-panel', { state: 'hidden', timeout: 3000 });
 

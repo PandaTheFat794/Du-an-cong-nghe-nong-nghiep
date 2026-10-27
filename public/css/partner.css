@@ -55,6 +55,7 @@
 .chat-view { flex: 1; display: flex; flex-direction: column; background: transparent; min-width: 0; overflow: hidden; }
 .partner-view { position: relative; background: transparent; }
 .partner-topbar {
+  position: relative; z-index: 20; /* nổi trên .partner-stage để panel Tài khoản không bị che */
   display: flex; align-items: center; gap: 0.65rem;
   min-height: 68px; /* bằng chiều cao header sidebar "Lộ trình tư vấn" */
   padding: 0.85rem 1.1rem;
