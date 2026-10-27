@@ -182,6 +182,7 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(con
 
 // Bảng process_entries: nhật ký canh tác do khách hàng tự ghi (ngày thực hiện,
 // hoạt động, phương pháp, chi tiết, ảnh/tài liệu đính kèm).
+// Năng suất/sản lượng dùng cho mục thu hoạch; admin chấm chất lượng 1-5 + nhận xét.
 db.exec(`
   CREATE TABLE IF NOT EXISTS process_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,6 +194,12 @@ db.exec(`
     details TEXT,
     attachment_url TEXT,
     attachment_name TEXT,
+    area_ha REAL,
+    yield_per_ha REAL,
+    output_tons REAL,
+    quality_rating INTEGER,
+    quality_note TEXT,
+    quality_rated_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
@@ -200,6 +207,21 @@ db.exec(`
 db.exec(
   'CREATE INDEX IF NOT EXISTS idx_process_entries_user ON process_entries(user_id, performed_at DESC, id DESC);'
 );
+
+// Migration DB cũ: thêm cột năng suất/sản lượng + đánh giá chất lượng
+const processColumns = db.prepare('PRAGMA table_info(process_entries)').all().map((c) => c.name);
+for (const [column, type] of [
+  ['area_ha', 'REAL'],
+  ['yield_per_ha', 'REAL'],
+  ['output_tons', 'REAL'],
+  ['quality_rating', 'INTEGER'],
+  ['quality_note', 'TEXT'],
+  ['quality_rated_at', 'TEXT'],
+]) {
+  if (!processColumns.includes(column)) {
+    db.exec(`ALTER TABLE process_entries ADD COLUMN ${column} ${type}`);
+  }
+}
 
 // Seed tài khoản mặc định nếu DB rỗng (chạy 1 lần đầu)
 const existingAdmin = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
@@ -341,15 +363,24 @@ const statements = {
   ),
   getProcessEntries: db.prepare(
     `SELECT id, user_id AS userId, activity, performed_at AS performedAt, title, method, details,
-            attachment_url AS attachmentUrl, attachment_name AS attachmentName, created_at AS createdAt
+            attachment_url AS attachmentUrl, attachment_name AS attachmentName,
+            area_ha AS areaHa, yield_per_ha AS yieldPerHa, output_tons AS outputTons,
+            quality_rating AS qualityRating, quality_note AS qualityNote,
+            quality_rated_at AS qualityRatedAt, created_at AS createdAt
      FROM process_entries WHERE user_id = ?
      ORDER BY performed_at DESC, id DESC LIMIT 200`
   ),
   getProcessEntry: db.prepare('SELECT * FROM process_entries WHERE id = ?'),
   insertProcessEntry: db.prepare(
     `INSERT INTO process_entries
-       (user_id, activity, performed_at, title, method, details, attachment_url, attachment_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+       (user_id, activity, performed_at, title, method, details, attachment_url, attachment_name,
+        area_ha, yield_per_ha, output_tons)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ),
+  rateProcessEntry: db.prepare(
+    `UPDATE process_entries
+     SET quality_rating = ?, quality_note = ?, quality_rated_at = datetime('now')
+     WHERE id = ?`
   ),
   deleteProcessEntry: db.prepare('DELETE FROM process_entries WHERE id = ?'),
   getUserById: db.prepare('SELECT id, username, display_name, role FROM users WHERE id = ?'),
@@ -536,10 +567,16 @@ module.exports = {
       entry.method || null,
       entry.details || null,
       url,
-      name
+      name,
+      entry.areaHa ?? null,
+      entry.yieldPerHa ?? null,
+      entry.outputTons ?? null
     );
     return statements.getProcessEntry.get(info.lastInsertRowid);
   },
+
+  // Admin chấm chất lượng 1-5 + nhận xét cho một mục nhật ký
+  rateProcessEntry: (id, rating, note) => statements.rateProcessEntry.run(rating, note || null, id),
 
   deleteProcessEntry: (id) => statements.deleteProcessEntry.run(id),
 

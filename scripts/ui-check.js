@@ -7,6 +7,7 @@
 // Dùng server có sẵn (DB phải mới): UI_BASE=http://localhost:3000 node scripts/ui-check.js
 const { chromium } = require('playwright-core');
 const { spawn } = require('child_process');
+const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 
@@ -208,6 +209,31 @@ async function headerOverflow(page) {
     );
     assert((await U.locator('.process-entry-media-grid img').count()) === 2,
       'user thêm nhật ký kèm 2 ảnh → timeline hiện lưới 2 ảnh');
+
+    // Mục thu hoạch: nhập diện tích + năng suất → tự tính sản lượng
+    await U.click('#processAddToggle');
+    await U.selectOption('#processActivity', 'harvest');
+    await U.waitForSelector('#processYieldBlock:visible', { timeout: 3000 });
+    await U.fill('#processDate', ENTRY_DATE);
+    await U.fill('#processTitle', 'Thu hoạch vụ đông');
+    await U.fill('#processMethod', 'Máy gặt liên hợp');
+    await U.fill('#processArea', '2');
+    await U.fill('#processYield', '6.5');
+    await U.waitForFunction(
+      () => Math.abs(Number(document.getElementById('processOutput').value) - 13) < 0.001,
+      null, { timeout: 3000 }
+    );
+    await U.click('#processSubmitBtn');
+    await U.waitForFunction(
+      () => [...document.querySelectorAll('.process-entry-title')].some((el) => el.textContent.includes('Thu hoạch vụ đông')),
+      null, { timeout: 8000 }
+    );
+    const harvestCard = U.locator('.process-entry', { hasText: 'Thu hoạch vụ đông' });
+    const yieldTxt = await harvestCard.locator('.process-yield').innerText();
+    assert(/2/.test(yieldTxt) && /6,5/.test(yieldTxt) && /13/.test(yieldTxt),
+      'user nhập diện tích/năng suất → tự tính sản lượng 13 tấn + chip số liệu',
+      yieldTxt.replace(/\n/g, ' · '));
+
     await U.waitForTimeout(450); // chờ animation stagger của timeline kết thúc
     await U.screenshot({ path: SHOT('04-user-nhat-ky.png') });
     await U.click('#processDrawerClose');
@@ -230,7 +256,7 @@ async function headerOverflow(page) {
       partner: document.getElementById('statPartnerUnread').textContent,
       process: document.getElementById('statProcess').textContent,
     }));
-    assert(stats.customers === '1' && stats.unread === '1' && stats.partner === '0' && stats.process === '1',
+    assert(stats.customers === '1' && stats.unread === '1' && stats.partner === '0' && stats.process === '2',
       'sidebar admin có 4 thẻ tổng quan đúng số liệu', JSON.stringify(stats));
 
     // 🔍 tìm khách không tồn tại → empty state, Esc xóa lọc khôi phục danh sách
@@ -435,8 +461,9 @@ async function headerOverflow(page) {
     // ===== Admin xem nhật ký canh tác của khách =====
     await A.click('#processBtn');
     await A.waitForSelector('.process-overlay.open .process-entry', { timeout: 5000 });
-    const adminProc = await A.locator('.process-entry-title').first().innerText();
-    assert(adminProc.includes('Bón lót'), 'admin mở Nhật ký → thấy mục user vừa ghi', adminProc);
+    const adminTitles = await A.locator('.process-entry-title').allInnerTexts();
+    assert(adminTitles.some((t) => t.includes('Bón lót')) && adminTitles.some((t) => t.includes('Thu hoạch vụ đông')),
+      'admin mở Nhật ký → thấy cả mục bón phân và thu hoạch của user', adminTitles.join(' | '));
 
     // 🔍 lọc theo hoạt động không có mục → empty state riêng, nút xuất bị khóa
     await A.selectOption('#processFilterActivity', 'watering');
@@ -444,7 +471,7 @@ async function headerOverflow(page) {
     const filterEmptyTxt = await A.locator('.process-empty-filtered h3').innerText();
     const filterNoteTxt = await A.locator('#processFilterNote').innerText();
     assert(filterEmptyTxt.includes('khớp bộ lọc'), '🔍 lọc hoạt động không có mục → empty state riêng', filterEmptyTxt);
-    assert(filterNoteTxt.includes('0/1'), 'bộ lọc hiện số mục khớp/tổng', filterNoteTxt);
+    assert(filterNoteTxt.includes('0/2'), 'bộ lọc hiện số mục khớp/tổng', filterNoteTxt);
     assert(await A.locator('#processExportBtn').isDisabled(), '🔍 không có mục khớp → nút Xuất CSV bị khóa');
 
     // 🔍 lọc khoảng ngày loại mục cũ → vẫn giữ được dữ liệu gốc khi xóa lọc
@@ -452,7 +479,7 @@ async function headerOverflow(page) {
     await A.waitForSelector('.process-entry', { timeout: 3000 });
     await A.fill('#processFilterFrom', TOMORROW_DATE);
     await A.waitForSelector('.process-empty-filtered', { timeout: 3000 });
-    assert((await A.locator('#processFilterNote').innerText()).includes('0/1'),
+    assert((await A.locator('#processFilterNote').innerText()).includes('0/2'),
       '🔍 lọc "Từ ngày" sau ngày ghi → loại đúng mục cũ');
     await A.click('#processFilterReset');
     await A.waitForSelector('.process-entry', { timeout: 3000 });
@@ -461,12 +488,12 @@ async function headerOverflow(page) {
     // 🔍 lọc theo mùa vụ: mục hôm nay thuộc đúng mùa theo tháng hiện tại
     await A.selectOption('#processFilterSeason', OTHER_SEASON);
     await A.waitForSelector('.process-empty-filtered', { timeout: 3000 });
-    assert((await A.locator('#processFilterNote').innerText()).includes('0/1'),
+    assert((await A.locator('#processFilterNote').innerText()).includes('0/2'),
       `🔍 lọc mùa ${OTHER_SEASON} → loại mục thuộc mùa ${ENTRY_SEASON}`);
     await A.selectOption('#processFilterSeason', ENTRY_SEASON);
     await A.waitForSelector('.process-entry', { timeout: 3000 });
-    assert((await A.locator('#processFilterNote').innerText()).includes('1/1'),
-      `🔍 lọc mùa ${ENTRY_SEASON} → giữ đúng mục hôm nay`);
+    assert((await A.locator('#processFilterNote').innerText()).includes('2/2'),
+      `🔍 lọc mùa ${ENTRY_SEASON} → giữ đúng 2 mục hôm nay`);
     await A.click('#processFilterReset');
     await A.waitForSelector('.process-entry', { timeout: 3000 });
 
@@ -477,13 +504,58 @@ async function headerOverflow(page) {
     ]);
     const csv = fs.readFileSync(await download.path(), 'utf8');
     assert(download.suggestedFilename().endsWith('.csv')
-      && csv.includes('Bón phân') && csv.includes('Bón lót vụ đông'),
-      'xuất CSV nhật ký đúng tên file + dữ liệu', download.suggestedFilename());
+      && csv.includes('Bón phân') && csv.includes('Bón lót vụ đông')
+      && csv.includes('Thu hoạch vụ đông') && csv.includes('Năng suất (tấn/ha)') && csv.includes('13'),
+      'xuất CSV nhật ký đúng tên file + dữ liệu (kèm năng suất/sản lượng)',
+      download.suggestedFilename());
+
+    // Xuất Excel: sheet Nhật ký + Tổng hợp (sản lượng, chất lượng)
+    const [xlsxDownload] = await Promise.all([
+      A.waitForEvent('download', { timeout: 10000 }),
+      A.click('#processExcelBtn'),
+    ]);
+    const xlsxWb = new ExcelJS.Workbook();
+    await xlsxWb.xlsx.readFile(await xlsxDownload.path());
+    const xlsxSheets = xlsxWb.worksheets.map((w) => w.name);
+    const summaryValues = xlsxWb.getWorksheet('Tổng hợp').getColumn(2).values.join('|');
+    assert(xlsxDownload.suggestedFilename().endsWith('.xlsx')
+      && xlsxSheets.includes('Nhật ký') && xlsxSheets.includes('Tổng hợp') && /13/.test(summaryValues),
+      '🔍 xuất Excel nhật ký → sheet Nhật ký + Tổng hợp (tổng sản lượng 13 tấn)',
+      `${xlsxDownload.suggestedFilename()} · ${xlsxSheets.join(', ')}`);
+
+    // Admin chấm chất lượng cho mục thu hoạch
+    const adminHarvest = A.locator('.process-entry', { hasText: 'Thu hoạch vụ đông' });
+    await adminHarvest.locator('.process-quality-toggle').click();
+    await adminHarvest.locator('.process-quality-form select').selectOption('5');
+    await adminHarvest.locator('.process-quality-form textarea').fill('Hạt đều, ít sâu bệnh, đạt tiêu chuẩn xuất khẩu');
+    await adminHarvest.locator('.process-quality-form button[type=submit]').click();
+    await A.waitForFunction(
+      () => [...document.querySelectorAll('.process-entry')]
+        .some((el) => el.textContent.includes('Thu hoạch vụ đông') && el.textContent.includes('Chất lượng: 5/5')),
+      null, { timeout: 8000 }
+    );
+    const adminQualityTxt = await A.locator('.process-entry', { hasText: 'Thu hoạch vụ đông' })
+      .locator('.process-quality').innerText();
+    assert(adminQualityTxt.includes('5/5') && adminQualityTxt.includes('xuất khẩu'),
+      'admin chấm chất lượng 5/5 + nhận xét → card cập nhật',
+      adminQualityTxt.replace(/\n/g, ' · '));
 
     await A.waitForTimeout(450);
     await A.screenshot({ path: SHOT('04b-admin-nhat-ky.png') });
     await A.click('#processDrawerClose');
     await A.waitForSelector('.process-overlay', { state: 'hidden', timeout: 4000 });
+
+    // User tải lại nhật ký → thấy đánh giá chất lượng của admin
+    await U.click('#processBtn');
+    await U.waitForSelector('.process-overlay.open .process-entry', { timeout: 5000 });
+    const userHarvest = U.locator('.process-entry', { hasText: 'Thu hoạch vụ đông' });
+    await userHarvest.waitFor({ timeout: 5000 });
+    const userQualityTxt = await userHarvest.locator('.process-quality').innerText();
+    assert(userQualityTxt.includes('Chất lượng: 5/5') && userQualityTxt.includes('xuất khẩu'),
+      'user thấy đánh giá chất lượng của admin trong nhật ký',
+      userQualityTxt.replace(/\n/g, ' · '));
+    await U.click('#processDrawerClose');
+    await U.waitForSelector('.process-overlay', { state: 'hidden', timeout: 4000 });
 
     // ===== Partner: nhật ký + 2 luồng chat riêng =====
     const ctxP = await browser.newContext({
@@ -537,9 +609,13 @@ async function headerOverflow(page) {
       && partnerTabs.some((t) => t.includes('Nhắn admin')),
       'partner có 3 tab: nhật ký + chat riêng khách + chat riêng admin', partnerTabs.join(' | '));
     await P.waitForSelector('.process-entry', { timeout: 6000 });
-    const partnerProc = await P.locator('.process-entry-title').first().innerText();
-    assert(partnerProc.includes('Bón lót'), 'partner xem được nhật ký khách hàng vừa ghi', partnerProc);
+    const partnerTitles = await P.locator('.process-entry-title').allInnerTexts();
+    assert(partnerTitles.some((t) => t.includes('Bón lót')) && partnerTitles.some((t) => t.includes('Thu hoạch vụ đông')),
+      'partner xem được nhật ký khách hàng vừa ghi', partnerTitles.join(' | '));
     assert((await P.locator('.process-entry-media img').count()) >= 1, 'partner thấy ảnh đính kèm trong nhật ký');
+    const partnerQuality = await P.locator('.process-entry', { hasText: 'Thu hoạch vụ đông' })
+      .locator('.process-quality-badge').innerText();
+    assert(/5\/5/.test(partnerQuality), 'partner thấy đánh giá chất lượng của admin (chỉ đọc)', partnerQuality);
     await P.screenshot({ path: SHOT('05-partner-nhat-ky.png') });
 
     // Partner → khách (riêng tư, không lẫn chat admin)
@@ -697,8 +773,8 @@ async function headerOverflow(page) {
       top: document.getElementById('topCustomers').textContent,
       msglabel: document.getElementById('kpiMessagesLabel').textContent,
     }));
-    assert(kpis.customers === '1' && kpis.messages >= 9 && kpis.process === '1' && kpis.partners === '1',
-      'dashboard KPI đúng số liệu (khách=1, tin≥9, nhật ký=1, partner=1)', JSON.stringify(kpis));
+    assert(kpis.customers === '1' && kpis.messages >= 9 && kpis.process === '2' && kpis.partners === '1',
+      'dashboard KPI đúng số liệu (khách=1, tin≥9, nhật ký=2, partner=1)', JSON.stringify(kpis));
     assert(kpis.bars === 7, 'biểu đồ cột có đúng 7 ngày', `bars=${kpis.bars}`);
     assert(kpis.msglabel.includes('7 ngày'), 'nhãn KPI ghi rõ khoảng 7 ngày', kpis.msglabel);
     assert(kpis.legend >= 1 && kpis.top.includes('Khách hàng Test'),
@@ -718,6 +794,21 @@ async function headerOverflow(page) {
     await A.click('[data-stats-days="7"]');
     await A.waitForFunction(() => document.querySelectorAll('#barChart .bar-col').length === 7, null, { timeout: 6000 });
     ok('🔍 quay về 7 ngày → 7 cột');
+
+    // Xuất Excel tổng hợp từ dashboard
+    const [statsXlsx] = await Promise.all([
+      A.waitForEvent('download', { timeout: 10000 }),
+      A.click('#statsExportBtn'),
+    ]);
+    const statsWb = new ExcelJS.Workbook();
+    await statsWb.xlsx.readFile(await statsXlsx.path());
+    const statsSheets = statsWb.worksheets.map((w) => w.name);
+    assert(statsXlsx.suggestedFilename().endsWith('.xlsx')
+      && statsSheets.includes('Tổng quan') && statsSheets.includes('Nhật ký trong kỳ')
+      && statsSheets.includes('Tổng hợp nhật ký'),
+      '🔍 xuất Excel tổng hợp từ dashboard (Tổng quan + Nhật ký trong kỳ + Tổng hợp)',
+      statsSheets.join(', '));
+
     await A.click('#statsCloseBtn');
     await A.waitForSelector('#statsOverlay', { state: 'hidden', timeout: 4000 });
     ok('đóng dashboard bằng nút ×');

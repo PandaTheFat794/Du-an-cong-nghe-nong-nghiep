@@ -24,26 +24,32 @@ giao diện phong cách Zalo (xanh dương #0068FF).
 - Chat realtime với admin và **chat riêng** với partner: tab chuyển luồng, gửi ảnh/tài liệu/tin nhắn thoại (tối đa 5MB), typing indicator, trạng thái bubble "đang gửi", nhãn "Đã xem".
 - **Tìm kiếm trong lịch sử chat** (nút kính lúp trên header): gõ từ khóa → danh sách tin khớp, bấm một kết quả để nhảy tới đúng tin và highlight.
 - **Bot AI** trả lời tức thì các câu hỏi nông nghiệp phổ biến (sâu bệnh, phân bón, nước tưới...) ngay trong luồng chat với admin — hiển thị dạng stream có con trỏ nhấp nháy; ngoài giờ làm việc bot trả lời thông điệp hẹn phản hồi.
-- **Nhật ký canh tác**: ghi hoạt động (gieo hạt, bón phân, tưới nước, phun thuốc, tỉa cành, thu hoạch, khác), ngày thực hiện, phương pháp, chi tiết và **tối đa 5 ảnh/tệp mỗi mục**; xem timeline có thống kê, lọc theo hoạt động/khoảng ngày/**mùa vụ**, xuất CSV, tự xóa mục của mình.
+- **Nhật ký canh tác**: ghi hoạt động (gieo hạt, bón phân, tưới nước, phun thuốc, tỉa cành, thu hoạch, khác), ngày thực hiện, phương pháp, chi tiết và **tối đa 5 ảnh/tệp mỗi mục**.
+  - Mục **Thu hoạch** nhập thêm **diện tích (ha), năng suất (tấn/ha), sản lượng (tấn)**; sản lượng tự tính = diện tích × năng suất nếu để trống, timeline hiện chip số liệu + tổng sản lượng.
+  - Xem **đánh giá chất lượng 1–5 + nhận xét của admin** ngay trên mục nhật ký.
+  - Xem timeline có thống kê, lọc theo hoạt động/khoảng ngày/**mùa vụ**, xuất **CSV/Excel** (Excel có thêm sheet Tổng hợp), tự xóa mục của mình.
 - Lỗi mạng / bị rate-limit: tin chưa gửi được tự trả lại ô nhập, không mất nội dung.
 - Tab "Partner: <tên>" xuất hiện khi admin gán partner; chấm đỏ báo tin mới ở luồng còn lại.
 
 **Admin**
 - Sidebar danh sách khách hàng: 4 thẻ tổng quan (khách hàng, tin khách chưa đọc, tin partner chưa đọc, mục nhật ký), ô tìm kiếm theo tên/tên đăng nhập, preview tin cuối, badge đỏ, badge vàng, số mục nhật ký, xóa khách. Số liệu badge/tổng quan cập nhật realtime.
 - Chat realtime nhiều cuộc hội thoại; mỗi khách có 2 tab riêng: "Khách hàng" và "Partner: <tên>"; gán partner bằng dropdown, **hủy liên kết** partner qua **popup xác nhận** (không dùng hộp thoại mặc định của trình duyệt), đổi mật khẩu. Tìm kiếm trong lịch sử từng luồng chat.
-- Xem nhật ký canh tác của từng khách trong drawer; lọc theo hoạt động/khoảng ngày/mùa vụ, xuất CSV, cập nhật mới hiện realtime.
+- Xem nhật ký canh tác của từng khách trong drawer; lọc theo hoạt động/khoảng ngày/mùa vụ, xuất CSV/Excel, cập nhật mới hiện realtime.
+- **Đánh giá chất lượng**: chấm 1–5 (Kém → Rất tốt) + nhận xét cho từng mục nhật ký; user và partner thấy kết quả ngay (realtime), admin sửa lại được.
 - Badge đỏ chỉ đếm tin khách trong luồng admin↔khách; badge vàng chỉ đếm tin partner trong luồng partner↔admin (watermark id tin, không đếm tin mình gửi).
-- **Dashboard Thống kê** (nút "Thống kê"): chọn khoảng **7 / 30 / 90 ngày**; KPI (khách hàng, tin nhắn, mục nhật ký, partner), biểu đồ cột tin nhắn theo ngày, biểu đồ tròn hoạt động nhật ký theo màu, top 5 khách nhắn nhiều nhất trong khoảng đã chọn.
+- **Dashboard Thống kê** (nút "Thống kê"): chọn khoảng **7 / 30 / 90 ngày**; KPI (khách hàng, tin nhắn, mục nhật ký, partner), biểu đồ cột tin nhắn theo ngày, biểu đồ tròn hoạt động nhật ký theo màu, top 5 khách nhắn nhiều nhất trong khoảng đã chọn; **Xuất Excel tổng hợp** (Tổng quan, Tin nhắn theo ngày, Hoạt động nhật ký, Top khách hàng, Nhật ký trong kỳ, Tổng hợp năng suất/sản lượng/chất lượng).
 - **Bot AI**: toggle bật/tắt trợ lý AI cho từng khách ngay trên header chat; khi bot không chắc câu hỏi, admin nhận toast + ping để vào trả lời.
 
 **Partner (bên thứ ba)**
 - Chỉ thấy khách được admin gán; mở sẵn khách đầu tiên, theo dõi **nhật ký canh tác**.
 - Ba tab: "Nhật ký canh tác" (timeline + ảnh), "Nhắn khách hàng" và "Nhắn admin" — hai luồng chat riêng biệt, không nhìn thấy chat admin↔khách; tìm kiếm trong lịch sử từng luồng.
 - Nút **Tài khoản** (đổi mật khẩu) nằm trên taskbar đầu trang, cạnh nút tìm kiếm; panel xổ xuống thẳng hàng.
+- Xem **đánh giá chất lượng** của admin trên nhật ký khách (chỉ đọc) và **xuất Excel** nhật ký của khách.
 - Không tạo/xóa được nhật ký; server chặn thao tác ghi nhật ký ở REST. Quyền chat bị thu hồi ngay khi khách được gán partner khác hoặc admin hủy liên kết.
 
 **Chung**
-- Nhật ký realtime: khách thêm/xóa mục → admin và partner đang được gán thấy cập nhật (socket `process-updated`).
+- Nhật ký realtime: khách thêm/xóa mục, admin chấm/sửa chất lượng → admin và partner đang được gán thấy cập nhật (socket `process-updated`).
+- **Báo cáo Excel (.xlsx)**: nhật ký của khách (sheet Nhật ký + Tổng hợp) và dashboard admin (6 sheet) — dùng ExcelJS, có định dạng cột, bộ lọc và auto-filter.
 - Ghi âm tin nhắn thoại trực tiếp (MediaRecorder, tối đa 60 giây) ở cả 3 giao diện: bấm micro để ghi, dừng là tự tải lên và gửi; bubble có audio player phát lại.
 - Lịch sử chat phân trang (50 tin/trang, nút "Tải tin cũ hơn" giữ nguyên vị trí đọc).
 - Trang đăng nhập có 3 nút "Vào nhanh" cho tài khoản demo (Khách hàng / Admin / Partner): bấm là vào thẳng trang của role, không cần gõ mật khẩu.
@@ -71,7 +77,8 @@ SQLite (better-sqlite3, WAL) — users · conversations · messages · process_e
 ```
 
 - **Backend**: Node.js + Express 4 + Socket.io 4. Bot engine (`bot.js` + `knowledge-base.js` + `reply-cache.js`): matching keyword tiếng Việt (không dấu, whole-word) + LLM streaming (Gemini/OpenAI-compatible qua env `LLM_*`) với 3 tầng API: chính → fallback → fallback 2 → rule-based; cache câu trả lời LLM (LRU 200, TTL 24h); ngoài giờ làm việc trả thông điệp cố định.
-- **Database**: SQLite (better-sqlite3), WAL + `busy_timeout`, index `messages(conversation_id, id)` và `process_entries(user_id, performed_at DESC, id DESC)`.
+- **Database**: SQLite (better-sqlite3), WAL + `busy_timeout`, index `messages(conversation_id, id)` và `process_entries(user_id, performed_at DESC, id DESC)`; `process_entries` lưu thêm diện tích/năng suất/sản lượng và đánh giá chất lượng (rating 1–5, nhận xét, thời điểm).
+- **Excel**: `excel-export.js` dùng **ExcelJS** tạo `.xlsx` nhiều sheet (nhật ký + tổng hợp; dashboard 7/30/90 ngày).
 - **Auth**: express-session + SQLite session store tự viết; bcryptjs; socket xác thực bằng `sessionId`.
 - **Upload**: multer, giới hạn 5MB, kiểm tra chữ ký file (magic bytes) khớp phần mở rộng — ảnh, tài liệu và âm thanh (webm/ogg/mp3/wav/m4a).
 - **Frontend**: HTML5 + CSS3 + Vanilla JavaScript (không build tool).
@@ -161,11 +168,45 @@ Dự án đọc `.env` bằng `dotenv`; biến môi trường trong shell vẫn 
 - Dự phòng khi LLM chính lỗi/quá tải: `LLM_FALLBACK_*` (bậc 1) rồi `LLM_FALLBACK2_*` (bậc 2, mặc định Groq `openai/gpt-oss-120b`); hết fallback mới về rule-based.
 - `OFFICE_HOURS=8-17` giới hạn giờ bot tư vấn (end-exclusive); ngoài giờ bot trả thông điệp hẹn. `0-24` = luôn trong giờ.
 
+## Đối chiếu yêu cầu đề bài
+
+| Nhóm yêu cầu | Trạng thái | Thực hiện ở |
+|---|---|---|
+| Đăng ký/đăng nhập, phân quyền User · Admin · Partner | ✅ | `/api/register`, `/api/login`, page guards, `canAccessConversation` |
+| Chat realtime, luồng riêng tư 3 bên | ✅ | Socket.io `/ws`, 3 loại `conversations` |
+| Bot AI tư vấn tự động | ✅ | Knowledge base 12 chủ đề + LLM 3 tầng + giờ hành chính |
+| Nhật ký canh tác (hoạt động, ngày, phương pháp, ảnh) | ✅ | `process_entries` + drawer 3 role |
+| User cung cấp **năng suất, sản lượng** | ✅ | Mục Thu hoạch: diện tích (ha), năng suất (tấn/ha), sản lượng (tấn); tự tính sản lượng |
+| Admin **đánh giá chất lượng** | ✅ | Chấm 1–5 + nhận xét, cập nhật realtime; user/partner chỉ đọc |
+| Báo cáo tổng hợp | ✅ | CSV + Excel (nhật ký + dashboard 6 sheet) |
+| Thống kê | ✅ | Dashboard 7/30/90 ngày + xuất Excel |
+| Bảo mật | ✅ | bcrypt, session SQLite, CSRF, rate-limit, whitelist upload |
+
+> Đối chiếu theo mô tả trao đổi trong quá trình làm. Nếu đề bài còn mục khác, ghi rõ để bổ sung.
+
+## Ví dụ sử dụng (kịch bản đầy đủ)
+
+1. **Khách `user1`** đăng nhập → **Nhật ký** → **Thêm nhật ký**, ghi 3 mục:
+
+   | Ngày | Hoạt động | Nội dung | Diện tích | Năng suất | Sản lượng | Chất lượng |
+   |---|---|---|---|---|---|---|
+   | 05/01/2026 | Gieo hạt | Giống ST25, sạ hàng 100 kg/ha | – | – | – | – |
+   | 20/01/2026 | Bón phân | NPK 20-20-15, 150 kg/ha | – | – | – | – |
+   | 27/10/2026 | Thu hoạch | Máy gặt liên hợp, độ ẩm 22% | 2 ha | 6,5 tấn/ha | **13 tấn** (tự tính) | – |
+
+2. **Admin** mở nhật ký của khách → thấy chip `Diện tích 2 ha · Năng suất 6,5 tấn/ha · Sản lượng 13 tấn` và chip `Tổng sản lượng 13 tấn`.
+3. Admin bấm **Đánh giá chất lượng** → chọn `5 · Rất tốt`, nhận xét “Hạt đều, ít sâu bệnh, đạt tiêu chuẩn xuất khẩu” → **Lưu đánh giá**.
+4. **User** mở lại nhật ký (hoặc nhận realtime) → thấy badge `Chất lượng: 5/5 · Rất tốt` + nhận xét. **Partner** xem được đánh giá này nhưng không sửa.
+5. **Xuất báo cáo**:
+   - Drawer nhật ký → **Xuất Excel** → `nhat-ky-khach-hang-test-2026-10-27.xlsx` gồm sheet **Nhật ký** (14 cột: hoạt động, ngày, diện tích, năng suất, sản lượng, chất lượng, nhận xét, đính kèm…) và sheet **Tổng hợp** (2 mục, 1 mục thu hoạch, 2 ha, 13 tấn, năng suất TB 6,5 tấn/ha, chất lượng TB 5.0, phân bố 5★: 1).
+   - Dashboard admin → **Xuất Excel** → `thong-ke-7-ngay-2026-10-27.xlsx` gồm **Tổng quan**, **Tin nhắn theo ngày**, **Hoạt động nhật ký**, **Top khách hàng**, **Nhật ký trong kỳ**, **Tổng hợp nhật ký**.
+6. Partner mở tab **Nhật ký canh tác** → thấy số liệu + đánh giá; bấm **Xuất Excel** để gửi báo cáo cho admin.
+
 ## Kiểm thử
 
 ```bash
-npm run e2e        # 182 test: REST + socket + upload + nhật ký (nhiều ảnh) + 3 luồng chat + phân trang/tìm kiếm/around + rate-limit + session persist + CSRF + security + stats 7/30/90 ngày + Bot AI (toggle, off-hours, bot-unsure, fallback 1/2 + cache)
-npm run ui-check   # 117 check UI trên Edge/Chrome headless (tự spawn server + DB riêng; ghi âm dùng micro giả; dashboard 7/30 ngày, tìm kiếm chat, lightbox, title unread, Bot AI toggle, read receipt, popup hủy liên kết, taskbar partner 1 hàng, panel Tài khoản nổi trên cùng)
+npm run e2e        # 202 test: REST + socket + upload + nhật ký (nhiều ảnh, năng suất/sản lượng, chất lượng) + Excel + 3 luồng chat + phân trang/tìm kiếm/around + rate-limit + session persist + CSRF + security + stats + Bot AI
+npm run ui-check   # 123 check UI trên Edge/Chrome headless (tự spawn server + DB riêng; ghi âm dùng micro giả; nhập năng suất tự tính sản lượng, admin chấm chất lượng, tải Excel, dashboard, tìm kiếm, lightbox, read receipt, popup hủy liên kết)
 ```
 
 - `e2e` chạy server tạm ở port `3100`, DB `data/e2e.db` (luôn xóa trước khi chạy).
@@ -188,13 +229,16 @@ npm run ui-check   # 117 check UI trên Edge/Chrome headless (tự spawn server 
 | GET | `/api/conversations/:id/messages?before=&around=&limit=` | Theo `canAccessConversation` (3 luồng riêng) |
 | GET | `/api/conversations/:id/search?q=` | Theo `canAccessConversation` (tối đa 30 kết quả mới nhất, q 2–200 ký tự) |
 | GET | `/api/admin/users` · `/api/admin/partners` · `/api/admin/stats?days=7\|30\|90` | Admin (`stats`: KPI + chuỗi ngày + phân bố hoạt động + top 5 khách trong khoảng) |
+| GET | `/api/admin/stats/export?days=7\|30\|90` | Admin — tải Excel tổng hợp dữ liệu (6 sheet) |
 | POST | `/api/admin/conversations/:id/connect` | Admin |
 | POST | `/api/admin/conversations/:convId/disconnect` | Admin (hủy liên kết partner, giữ lịch sử) |
 | POST | `/api/admin/conversations/:convId/bot` | Admin (bật/tắt Bot AI cho khách, body `{ enabled: boolean }`) |
 | DELETE | `/api/admin/users/:id` | Admin |
 | GET | `/api/partner/conversations` | Partner (kèm `process_count`, `message_count`, 2 thread id) |
 | GET | `/api/process?userId=` | Admin / owner / partner được gán |
-| POST | `/api/process` | User (tạo mục nhật ký của chính mình, tối đa 5 tệp/mục) |
+| POST | `/api/process` | User (tạo mục nhật ký; tối đa 5 tệp/mục; `area_ha`, `yield_per_ha`, `output_tons` không âm) |
+| GET | `/api/process/export?userId=&season=&activity=&from=&to=` | Admin / owner / partner được gán — Excel nhật ký (`Nhật ký` + `Tổng hợp`) |
+| POST | `/api/process/:id/quality` | Admin — chấm chất lượng `{ rating: 1..5, note? }` |
 | DELETE | `/api/process/:id` | Owner hoặc admin |
 | POST | `/api/upload` | Đã đăng nhập (rate-limit 30/10 phút/user) |
 
@@ -226,7 +270,7 @@ của khách đang được gán (kiểm tra lại `user_admin.partner_id`).
 | Server → room `conv_<id>` | `bot-stream` | `{ convId, delta, clientId }` — Bot AI trả lời từng cụm chữ; kết thúc bằng `message` senderRole=bot cùng `clientId`. LLM chính lỗi giữa chừng → server gửi `{ reset: true }` để client xóa stream dở trước khi API fallback gõ tiếp |
 
 `process-updated` bắn tới room `admins`, room `user_admin` và room `partner_user` của partner đang gán khi khách thêm/xóa mục nhật ký:
-`{ userId, userName, convId, action: 'created' | 'deleted', entryId }`.
+`{ userId, userName, convId, action: 'created' | 'deleted' | 'rated', entryId }`.
 
 Bot AI chỉ trả lời khi khách gửi tin trong `user_admin` và `bot_enabled=1`; tin bot không tạo badge unread, không bị rate-limit socket.
 
@@ -254,6 +298,7 @@ bot.js               # Bot AI: normalize/match tiếng Việt + LLM streaming (c
 knowledge-base.js    # Kiến thức 12 chủ đề nông nghiệp (keywords + câu trả lời)
 reply-cache.js       # Cache câu trả lời LLM (LRU 200, TTL 24h)
 uploads-cleanup.js   # Job dọn file rác trong public/uploads/
+excel-export.js      # Xuất .xlsx: nhật ký + tổng hợp năng suất/sản lượng/chất lượng, dashboard admin
 session-store.js     # express-session store trên SQLite
 routes/              # auth (+/csrf), chat (messages/search/around), admin (+stats/disconnect/bot), partner, process, upload
 public/              # index/chat/admin/partner.html, css/base.css, auth.css, chat.css, process.css, admin.css, partner.css, js/*.js, favicon.svg
@@ -267,9 +312,9 @@ docs/screenshots/    # Ảnh cho README
 
 - Chưa rate-limit toàn bộ API; CSRF token chưa rotate định kỳ (chỉ cấp một lần/session).
 - Tìm kiếm chat trả tối đa 30 kết quả mới nhất, chưa phân trang kết quả; chưa tìm xuyên nhiều luồng.
-- Nhật ký giới hạn 200 mục gần nhất/khách, tối đa 5 tệp/mục; chưa xuất PDF/Excel.
+- Nhật ký giới hạn 200 mục gần nhất/khách, tối đa 5 tệp/mục; Excel xuất theo phạm vi đó, chưa hỗ trợ PDF.
 - Lịch sử chat phân trang theo id; chưa virtualize DOM cho hội thoại rất dài.
 - Rate limiter và cache câu trả lời LLM lưu trong bộ nhớ → mất khi restart, cần Redis nếu chạy nhiều instance.
 - Bot AI: rule-based còn giới hạn 12 chủ đề; có thể mở rộng KB, học từ phản hồi thật, thống kê câu hỏi bot không trả lời được.
-- Dashboard giới hạn 7/30/90 ngày; có thể bổ sung thống kê theo tháng/mùa vụ và xuất báo cáo.
+- Dashboard giới hạn 7/30/90 ngày; có thể bổ sung thống kê theo tháng/mùa vụ ngoài các khoảng này.
 - Có thể bổ sung thông báo push (Notification API + service worker).

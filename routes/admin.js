@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth, requireRole } = require('../auth');
 const { db, ensurePartnerThreads, setBotEnabled } = require('../db');
+const { statsWorkbookBuffer } = require('../excel-export');
 
 /**
  * GET /api/admin/users
@@ -72,12 +73,7 @@ router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
  * customers/partners là số toàn hệ thống; messages/processEntries/topCustomers
  * và 2 biểu đồ chỉ tính trong khoảng đã chọn.
  */
-router.get('/stats', requireAuth, requireRole('admin'), (req, res) => {
-  const days = req.query.days === undefined ? 7 : Number(req.query.days);
-  if (![7, 30, 90].includes(days)) {
-    return res.status(400).json({ error: 'days phải là 7, 30 hoặc 90' });
-  }
-
+function computeStats(days) {
   // Mốc đầu ngày local, tính lùi days-1 ngày (hôm nay + days-1 ngày trước = đủ days ngày)
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -121,7 +117,50 @@ router.get('/stats', requireAuth, requireRole('admin'), (req, res) => {
      GROUP BY u.id ORDER BY message_count DESC, u.id ASC LIMIT 5`
   ).all(startDate);
 
-  res.json({ success: true, days, totals, messagesByDay, processByActivity, topCustomers });
+  return { days, startDate, totals, messagesByDay, processByActivity, topCustomers };
+}
+
+router.get('/stats', requireAuth, requireRole('admin'), (req, res) => {
+  const days = req.query.days === undefined ? 7 : Number(req.query.days);
+  if (![7, 30, 90].includes(days)) {
+    return res.status(400).json({ error: 'days phải là 7, 30 hoặc 90' });
+  }
+  const { startDate, ...stats } = computeStats(days);
+  res.json({ success: true, ...stats });
+});
+
+/**
+ * GET /api/admin/stats/export?days=7|30|90
+ * Xuất Excel tổng hợp dữ liệu: Tổng quan, Tin nhắn theo ngày, Hoạt động nhật ký,
+ * Top khách hàng, Nhật ký canh tác trong kỳ + Tổng hợp năng suất/sản lượng/chất lượng.
+ */
+router.get('/stats/export', requireAuth, requireRole('admin'), async (req, res) => {
+  const days = req.query.days === undefined ? 7 : Number(req.query.days);
+  if (![7, 30, 90].includes(days)) {
+    return res.status(400).json({ error: 'days phải là 7, 30 hoặc 90' });
+  }
+  const stats = computeStats(days);
+  const journal = db.prepare(
+    `SELECT p.id, u.display_name AS userName, p.activity,
+            p.performed_at AS performedAt, p.title, p.method, p.details,
+            p.area_ha AS areaHa, p.yield_per_ha AS yieldPerHa, p.output_tons AS outputTons,
+            p.quality_rating AS qualityRating, p.quality_note AS qualityNote,
+            p.quality_rated_at AS qualityRatedAt
+     FROM process_entries p JOIN users u ON u.id = p.user_id
+     WHERE u.role = 'user' AND p.performed_at >= ?
+     ORDER BY p.performed_at DESC, p.id DESC`
+  ).all(stats.startDate);
+
+  try {
+    const buffer = await statsWorkbookBuffer({ ...stats, journal });
+    const today = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="thong-ke-${days}-ngay-${today}.xlsx"`);
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    console.error('Xuất Excel thống kê lỗi:', err);
+    res.status(500).json({ error: 'Không xuất được file Excel' });
+  }
 });
 
 /**

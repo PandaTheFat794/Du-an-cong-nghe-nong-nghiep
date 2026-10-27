@@ -80,6 +80,19 @@ async function httpJson(pathname, { method = 'GET', body, cookie, formData, skip
   return { status: resp.status, data, cookie: sid || null };
 }
 
+// Tải file nhị phân (Excel) — không parse JSON
+async function fetchBinary(pathname, cookie, base = BASE) {
+  const resp = await fetch(base + pathname, { headers: cookie ? { cookie } : {} });
+  const buf = Buffer.from(await resp.arrayBuffer());
+  return { status: resp.status, headers: resp.headers, buf };
+}
+
+function isXlsx(res) {
+  return /spreadsheetml\.sheet/.test(res.headers.get('content-type') || '')
+    && res.buf.length > 2000
+    && res.buf.slice(0, 2).toString() === 'PK';
+}
+
 function loginAndGetSession(username, password, base = BASE) {
   return httpJson('/api/login', {
     method: 'POST',
@@ -258,6 +271,122 @@ async function main() {
     },
   });
   check('🔍 nhật ký đính kèm path traversal → 400', r.status === 400, `status ${r.status}`);
+
+  // ===== 2b2. Năng suất/sản lượng + admin đánh giá chất lượng =====
+  r = await httpJson('/api/process', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: {
+      activity: 'harvest',
+      performed_at: '2026-01-10',
+      title: 'Thu hoạch vụ đông',
+      method: 'Máy gặt liên hợp',
+      details: 'Lúa chín đều, độ ẩm 22%',
+      area_ha: 2,
+      yield_per_ha: 6.5,
+      output_tons: 13,
+    },
+  });
+  check('🔍 nhật ký thu hoạch kèm diện tích/năng suất/sản lượng → 201',
+    r.status === 201 && r.data.entry.areaHa === 2 && r.data.entry.yieldPerHa === 6.5
+      && r.data.entry.outputTons === 13 && r.data.entry.qualityRating === null,
+    JSON.stringify(r.data.entry || r.data));
+  const harvestEntryId = r.data && r.data.entry && r.data.entry.id;
+
+  r = await httpJson('/api/process', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { activity: 'harvest', performed_at: '2026-01-11', title: 'Sản lượng âm', output_tons: -1 },
+  });
+  check('🔍 sản lượng âm → 400', r.status === 400, `status ${r.status}`);
+
+  r = await httpJson('/api/process', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { activity: 'harvest', performed_at: '2026-01-11', title: 'Năng suất phi thực tế', yield_per_ha: 999 },
+  });
+  check('🔍 năng suất vượt ngưỡng (999 tấn/ha) → 400', r.status === 400, `status ${r.status}`);
+
+  r = await httpJson('/api/process', { cookie: user.cookie });
+  const harvestRow = r.data.entries.find((e) => e.id === harvestEntryId);
+  check('🔍 GET nhật ký trả đủ areaHa/yieldPerHa/outputTons',
+    !!harvestRow && harvestRow.areaHa === 2 && harvestRow.yieldPerHa === 6.5 && harvestRow.outputTons === 13,
+    JSON.stringify(harvestRow));
+
+  r = await httpJson(`/api/process/${harvestEntryId}/quality`, {
+    method: 'POST', body: { rating: 4, note: 'Hạt đều' }, cookie: user.cookie,
+  });
+  check('user không được chấm chất lượng → 403', r.status === 403, `status ${r.status}`);
+
+  r = await httpJson(`/api/process/${harvestEntryId}/quality`, {
+    method: 'POST', body: { rating: 4, note: 'Hạt đều' }, cookie: partner.cookie,
+  });
+  check('partner không được chấm chất lượng → 403', r.status === 403, `status ${r.status}`);
+
+  r = await httpJson(`/api/process/${harvestEntryId}/quality`, {
+    method: 'POST', body: { rating: 0 }, cookie: admin.cookie,
+  });
+  check('🔍 chất lượng ngoài thang 1-5 (0) → 400', r.status === 400, `status ${r.status}`);
+
+  r = await httpJson(`/api/process/${harvestEntryId}/quality`, {
+    method: 'POST', body: { rating: 6 }, cookie: admin.cookie,
+  });
+  check('🔍 chất lượng ngoài thang 1-5 (6) → 400', r.status === 400, `status ${r.status}`);
+
+  r = await httpJson(`/api/process/${harvestEntryId}/quality`, {
+    method: 'POST', body: { rating: 4.5 }, cookie: admin.cookie,
+  });
+  check('🔍 chất lượng không phải số nguyên → 400', r.status === 400, `status ${r.status}`);
+
+  r = await httpJson(`/api/process/${harvestEntryId}/quality`, {
+    method: 'POST', body: { rating: 5, note: 'x'.repeat(501) }, cookie: admin.cookie,
+  });
+  check('🔍 nhận xét chất lượng > 500 ký tự → 400', r.status === 400, `status ${r.status}`);
+
+  r = await httpJson(`/api/process/${harvestEntryId}/quality`, {
+    method: 'POST', body: { rating: 5, note: 'Hạt đều, ít sâu bệnh, đạt tiêu chuẩn xuất khẩu' }, cookie: admin.cookie,
+  });
+  check('admin chấm chất lượng 5/5 + nhận xét → 200',
+    r.status === 200 && r.data.success && r.data.entry.qualityRating === 5
+      && /xuất khẩu/.test(r.data.entry.qualityNote || '') && !!r.data.entry.qualityRatedAt,
+    JSON.stringify(r.data));
+
+  r = await httpJson('/api/process', { cookie: user.cookie });
+  const ratedRow = r.data.entries.find((e) => e.id === harvestEntryId);
+  check('🔍 user thấy đánh giá chất lượng của admin trong nhật ký',
+    !!ratedRow && ratedRow.qualityRating === 5 && !!ratedRow.qualityRatedAt,
+    JSON.stringify(ratedRow && { q: ratedRow.qualityRating, note: ratedRow.qualityNote }));
+
+  r = await httpJson('/api/process/999999/quality', {
+    method: 'POST', body: { rating: 4 }, cookie: admin.cookie,
+  });
+  check('🔍 chấm chất lượng mục không tồn tại → 404', r.status === 404, `status ${r.status}`);
+
+  // ===== 2b3. Xuất Excel nhật ký + dashboard tổng hợp =====
+  let xlsx = await fetchBinary('/api/process/export', user.cookie);
+  check('user xuất Excel nhật ký → file .xlsx hợp lệ',
+    xlsx.status === 200 && isXlsx(xlsx), `status ${xlsx.status}, ${xlsx.buf.length} bytes`);
+
+  xlsx = await fetchBinary('/api/process/export?season=dong-xuan&activity=harvest', user.cookie);
+  check('🔍 xuất Excel có bộ lọc mùa vụ/hoạt động → 200',
+    xlsx.status === 200 && isXlsx(xlsx), `status ${xlsx.status}`);
+
+  xlsx = await fetchBinary(`/api/process/export?userId=${user.user.id}`, admin.cookie);
+  check('admin xuất Excel nhật ký của khách → 200',
+    xlsx.status === 200 && isXlsx(xlsx), `status ${xlsx.status}`);
+
+  xlsx = await fetchBinary(`/api/process/export?userId=${user.user.id}`, partner.cookie);
+  check('🔍 partner chưa được gán xuất Excel nhật ký → 403', xlsx.status === 403, `status ${xlsx.status}`);
+
+  xlsx = await fetchBinary('/api/admin/stats/export', user.cookie);
+  check('🔍 user xuất Excel thống kê → 403', xlsx.status === 403, `status ${xlsx.status}`);
+
+  xlsx = await fetchBinary('/api/admin/stats/export?days=15', admin.cookie);
+  check('🔍 stats export days sai → 400', xlsx.status === 400, `status ${xlsx.status}`);
+
+  xlsx = await fetchBinary('/api/admin/stats/export?days=7', admin.cookie);
+  check('admin xuất Excel tổng hợp dữ liệu → file .xlsx hợp lệ',
+    xlsx.status === 200 && isXlsx(xlsx), `status ${xlsx.status}, ${xlsx.buf.length} bytes`);
 
   // ===== 2c. Security headers + thống kê admin =====
   const hResp = await fetch(BASE + '/api/me');

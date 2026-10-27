@@ -67,6 +67,26 @@ async function uploadFile(file) {
   return data;
 }
 
+// Tải file (GET, không cần CSRF) và lưu về máy; đọc tên file từ Content-Disposition
+async function downloadFile(path, fallbackName = 'download') {
+  const resp = await fetch(API_BASE + path);
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error((data && data.error) || 'Tải file thất bại');
+  }
+  const blob = await resp.blob();
+  const cd = resp.headers.get('content-disposition') || '';
+  const match = /filename="([^"]+)"/i.exec(cd);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = (match && match[1]) || fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 const IMAGE_EXT_RE = /\.(jpe?g|png|gif|webp)$/i;
 const AUDIO_EXT_RE = /\.(webm|ogg|oga|mp3|wav|m4a)$/i;
 

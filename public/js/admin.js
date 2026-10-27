@@ -32,8 +32,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const partnerThreadTab = document.getElementById('partnerThreadTab');
   const tabButtons = [...threadTabs.querySelectorAll('.view-tab')];
 
-  // Drawer nhật ký canh tác (admin xem + xóa, không thêm thay khách)
-  const processDrawer = createProcessDrawer({});
+  // Drawer nhật ký canh tác (admin xem + xóa + chấm chất lượng, không thêm thay khách)
+  const processDrawer = createProcessDrawer({ canRate: true });
   processBtn.addEventListener('click', () => {
     if (selectedUser) processDrawer.open(selectedUser.id, selectedUser.display_name);
   });
@@ -450,6 +450,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ===== Thống kê hệ thống =====
   const statsOverlay = document.getElementById('statsOverlay');
   const statsCloseBtn = document.getElementById('statsCloseBtn');
+  const statsExportBtn = document.getElementById('statsExportBtn');
   const ACTIVITY_META = {
     sowing: { label: 'Gieo hạt', color: '#16a34a' },
     fertilizing: { label: 'Bón phân', color: '#b45309' },
@@ -595,6 +596,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     statsOverlay.hidden = false;
     statsCloseBtn.focus();
     await loadStats();
+  });
+  statsExportBtn.addEventListener('click', async () => {
+    statsExportBtn.disabled = true;
+    try {
+      await downloadFile(`/admin/stats/export?days=${statsDays}`, `thong-ke-${statsDays}-ngay.xlsx`);
+      toast('Đã xuất Excel tổng hợp dữ liệu.', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      statsExportBtn.disabled = false;
+    }
   });
   statsCloseBtn.addEventListener('click', closeStats);
   statsOverlay.addEventListener('click', (e) => {

@@ -148,6 +148,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     processTimeline.dataset.ready = '';
     loadProcess();
   });
+  document.getElementById('exportProcessBtn').addEventListener('click', async () => {
+    if (!selectedCustomer) return;
+    try {
+      await downloadFile(`/process/export?userId=${selectedCustomer.user_id}`, 'nhat-ky.xlsx');
+      toast('Đã xuất nhật ký của khách ra Excel.', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
 
   function updateItemCounts(userId, processDelta, messageDelta) {
     const item = listEl.querySelector(`.partner-item[data-user-id="${userId}"]`);
@@ -269,7 +278,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     applySeenStatus(messagesEl, d.seenUpTo, 'partner');
   });
   socket.on('process-updated', (d) => {
-    updateItemCounts(d.userId, d.action === 'created' ? 1 : -1, 0);
+    updateItemCounts(d.userId, d.action === 'created' ? 1 : d.action === 'deleted' ? -1 : 0, 0);
     if (!selectedCustomer || d.userId !== selectedCustomer.user_id) return;
     clearTimeout(processTimer);
     processTimer = setTimeout(loadProcess, 250);

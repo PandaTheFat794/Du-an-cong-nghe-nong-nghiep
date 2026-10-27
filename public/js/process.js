@@ -44,6 +44,22 @@ const PROCESS_ACTIVITY_MAP = PROCESS_ACTIVITIES.reduce((acc, item) => {
   return acc;
 }, {});
 
+// Thang đánh giá chất lượng do admin chấm (1-5)
+const PROCESS_QUALITY_LABELS = {
+  1: 'Kém',
+  2: 'Yếu',
+  3: 'Trung bình',
+  4: 'Tốt',
+  5: 'Rất tốt',
+};
+
+const processNumberFormat = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
+
+function processNumber(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? processNumberFormat.format(num) : '';
+}
+
 // 3 mùa vụ lúa phổ biến (theo tháng thực hiện trong nhật ký)
 const PROCESS_SEASONS = [
   { key: 'dong-xuan', label: 'Đông Xuân', months: [12, 1, 2, 3, 4] },
@@ -162,12 +178,145 @@ function processSummaryEl(entries) {
     summary.appendChild(chip);
   }
 
+  const totalOutput = entries.reduce((sum, e) => sum + (Number(e.outputTons) || 0), 0);
+  if (totalOutput > 0) {
+    const chip = document.createElement('span');
+    chip.className = 'process-output-total';
+    chip.textContent = `Tổng sản lượng ${processNumber(totalOutput)} tấn`;
+    summary.appendChild(chip);
+  }
+
   return summary;
+}
+
+// Diện tích / năng suất / sản lượng của mục thu hoạch
+function processYieldEl(entry) {
+  const items = [];
+  if (entry.areaHa != null) items.push(['Diện tích', entry.areaHa, 'ha']);
+  if (entry.yieldPerHa != null) items.push(['Năng suất', entry.yieldPerHa, 'tấn/ha']);
+  if (entry.outputTons != null) items.push(['Sản lượng', entry.outputTons, 'tấn']);
+  if (!items.length) return null;
+
+  const row = document.createElement('div');
+  row.className = 'process-yield';
+  for (const [label, value, unit] of items) {
+    const chip = document.createElement('span');
+    chip.className = 'process-yield-chip';
+    const strong = document.createElement('strong');
+    strong.textContent = `${label} `;
+    chip.append(strong, document.createTextNode(`${processNumber(value)} ${unit}`));
+    row.appendChild(chip);
+  }
+  return row;
+}
+
+// Đánh giá chất lượng: user/partner chỉ xem; admin (canRate) được chấm 1-5 + nhận xét
+function processQualityEl(entry, opts = {}) {
+  const hasRating = Number.isInteger(entry.qualityRating) && entry.qualityRating >= 1;
+  if (!hasRating && !opts.canRate) return null;
+
+  const block = document.createElement('div');
+  block.className = 'process-quality';
+
+  if (hasRating) {
+    const badge = document.createElement('span');
+    badge.className = `process-quality-badge quality-${entry.qualityRating}`;
+    badge.textContent = `Chất lượng: ${entry.qualityRating}/5 · ${PROCESS_QUALITY_LABELS[entry.qualityRating] || ''}`;
+    block.appendChild(badge);
+    if (entry.qualityNote) {
+      const note = document.createElement('p');
+      note.className = 'process-quality-note';
+      note.textContent = entry.qualityNote;
+      block.appendChild(note);
+    }
+  } else {
+    const hint = document.createElement('span');
+    hint.className = 'process-quality-hint';
+    hint.textContent = 'Chưa có đánh giá chất lượng';
+    block.appendChild(hint);
+  }
+
+  if (opts.canRate) {
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'process-quality-toggle';
+    toggle.textContent = hasRating ? 'Sửa đánh giá' : 'Đánh giá chất lượng';
+
+    const form = document.createElement('form');
+    form.className = 'process-quality-form';
+    form.hidden = true;
+
+    const ratingField = document.createElement('label');
+    ratingField.className = 'process-field';
+    const ratingTitle = document.createElement('span');
+    ratingTitle.textContent = 'Mức chất lượng';
+    const ratingSelect = document.createElement('select');
+    for (const [value, label] of Object.entries(PROCESS_QUALITY_LABELS)) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = `${value} · ${label}`;
+      ratingSelect.appendChild(option);
+    }
+    ratingSelect.value = String(hasRating ? entry.qualityRating : 5);
+    ratingField.append(ratingTitle, ratingSelect);
+
+    const noteField = document.createElement('label');
+    noteField.className = 'process-field';
+    const noteTitle = document.createElement('span');
+    noteTitle.textContent = 'Nhận xét';
+    const noteInput = document.createElement('textarea');
+    noteInput.rows = 2;
+    noteInput.maxLength = 500;
+    noteInput.placeholder = 'Ví dụ: Hạt đều, ít sâu bệnh, đạt tiêu chuẩn xuất khẩu...';
+    noteInput.value = entry.qualityNote || '';
+    noteField.append(noteTitle, noteInput);
+
+    const actions = document.createElement('div');
+    actions.className = 'process-form-actions';
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'submit';
+    saveBtn.className = 'btn-primary';
+    saveBtn.textContent = 'Lưu đánh giá';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'chat-btn';
+    cancelBtn.textContent = 'Hủy';
+    actions.append(saveBtn, cancelBtn);
+    form.append(ratingField, noteField, actions);
+
+    toggle.addEventListener('click', () => {
+      form.hidden = !form.hidden;
+      if (!form.hidden) ratingSelect.focus();
+    });
+    cancelBtn.addEventListener('click', () => {
+      form.hidden = true;
+      toggle.focus();
+    });
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      saveBtn.disabled = true;
+      const { status, data } = await api(`/process/${entry.id}/quality`, {
+        method: 'POST',
+        body: JSON.stringify({ rating: Number(ratingSelect.value), note: noteInput.value.trim() }),
+      });
+      saveBtn.disabled = false;
+      if (status === 200 && data && data.success) {
+        toast('Đã lưu đánh giá chất lượng.', 'success');
+        if (typeof opts.onRated === 'function') await opts.onRated();
+      } else {
+        toast((data && data.error) || 'Không lưu được đánh giá', 'error');
+      }
+    });
+
+    block.append(toggle, form);
+  }
+
+  return block;
 }
 
 /**
  * Một mục nhật ký dạng card trên timeline.
- * opts: { canDelete, onDelete, index }
+ * opts: { canDelete, onDelete, canRate, onRated, index }
  */
 function processEntryEl(entry, opts = {}) {
   const meta = processActivityMeta(entry.activity);
@@ -221,6 +370,9 @@ function processEntryEl(entry, opts = {}) {
     card.appendChild(details);
   }
 
+  const yieldRow = processYieldEl(entry);
+  if (yieldRow) card.appendChild(yieldRow);
+
   const attachments = (entry.attachments && entry.attachments.length)
     ? entry.attachments
     : (entry.attachmentUrl ? [{ url: entry.attachmentUrl, name: entry.attachmentName || '' }] : []);
@@ -233,6 +385,9 @@ function processEntryEl(entry, opts = {}) {
     attachments.forEach((att) => grid.appendChild(processAttachmentEl(att)));
     card.appendChild(grid);
   }
+
+  const quality = processQualityEl(entry, opts);
+  if (quality) card.appendChild(quality);
 
   const foot = document.createElement('div');
   foot.className = 'process-entry-foot';
@@ -279,7 +434,7 @@ function renderProcessTimeline(container, entries, opts = {}) {
  * Drawer trượt từ phải, dùng cho trang User (thêm/xóa) và Admin (xem/xóa).
  * canAdd: hiện form thêm nhật ký. onChanged: callback sau khi thêm/xóa.
  */
-function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
+function createProcessDrawer({ canAdd = false, canRate = false, onChanged = null } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'process-overlay';
   overlay.hidden = true;
@@ -320,6 +475,24 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
           <span>Chi tiết</span>
           <textarea id="processDetails" rows="4" maxlength="2000" placeholder="Liều lượng, thời tiết, tình trạng cây trồng..."></textarea>
         </label>
+        <div class="process-yield-block" id="processYieldBlock" hidden>
+          <p class="process-yield-heading">Năng suất &amp; sản lượng <span>dành cho mục thu hoạch</span></p>
+          <div class="process-form-row process-yield-row">
+            <label class="process-field">
+              <span>Diện tích (ha)</span>
+              <input id="processArea" type="number" min="0" max="1000000" step="0.01" placeholder="2">
+            </label>
+            <label class="process-field">
+              <span>Năng suất (tấn/ha)</span>
+              <input id="processYield" type="number" min="0" max="100" step="0.01" placeholder="6.5">
+            </label>
+            <label class="process-field">
+              <span>Sản lượng (tấn)</span>
+              <input id="processOutput" type="number" min="0" max="10000000" step="0.01" placeholder="13">
+            </label>
+          </div>
+          <p class="process-yield-hint">Sản lượng tự tính = diện tích × năng suất nếu để trống.</p>
+        </div>
         <div class="process-attach-row">
           <button class="attach-btn" id="processAttachBtn" type="button" title="Đính kèm ảnh" aria-label="Đính kèm ảnh hoặc tài liệu">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
@@ -358,6 +531,7 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
         <div class="process-filter-actions">
           <button class="chat-btn" id="processFilterReset" type="button">Xóa lọc</button>
           <button class="chat-btn process-export-btn" id="processExportBtn" type="button" disabled>Xuất CSV</button>
+          <button class="chat-btn process-excel-btn" id="processExcelBtn" type="button" disabled>Xuất Excel</button>
           <span class="process-filter-note" id="processFilterNote"></span>
         </div>
       </div>
@@ -377,6 +551,10 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
   const titleInput = overlay.querySelector('#processTitle');
   const methodInput = overlay.querySelector('#processMethod');
   const detailsInput = overlay.querySelector('#processDetails');
+  const yieldBlock = overlay.querySelector('#processYieldBlock');
+  const areaInput = overlay.querySelector('#processArea');
+  const yieldInput = overlay.querySelector('#processYield');
+  const outputInput = overlay.querySelector('#processOutput');
   const timelineEl = overlay.querySelector('#processTimeline');
   const closeBtn = overlay.querySelector('#processDrawerClose');
   const cancelBtn = overlay.querySelector('#processCancelBtn');
@@ -392,6 +570,7 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
   const filterReset = overlay.querySelector('#processFilterReset');
   const filterNote = overlay.querySelector('#processFilterNote');
   const exportBtn = overlay.querySelector('#processExportBtn');
+  const excelBtn = overlay.querySelector('#processExcelBtn');
 
   for (const season of PROCESS_SEASONS) {
     const option = document.createElement('option');
@@ -416,8 +595,27 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
   let pendingAttachments = [];
   let allEntries = [];
   let currentName = '';
+  let outputAuto = false;
 
   const PROCESS_ATTACH_MAX = 5;
+
+  function syncYieldVisibility() {
+    yieldBlock.hidden = activitySelect.value !== 'harvest';
+  }
+
+  // Sản lượng = diện tích × năng suất khi người dùng chưa tự sửa ô sản lượng
+  function autoCalcOutput() {
+    if (outputInput.value && !outputAuto) return;
+    const area = Number(areaInput.value);
+    const yieldNum = Number(yieldInput.value);
+    if (area > 0 && yieldNum > 0) {
+      outputInput.value = String(Math.round(area * yieldNum * 100) / 100);
+      outputAuto = true;
+    } else if (outputAuto) {
+      outputInput.value = '';
+      outputAuto = false;
+    }
+  }
 
   if (canAdd) {
     toolbar.hidden = false;
@@ -469,8 +667,15 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
     dateInput.value = todayIsoDate();
     activitySelect.value = 'sowing';
     pendingAttachments = [];
+    outputAuto = false;
     renderAttachChips();
+    syncYieldVisibility();
   }
+
+  activitySelect.addEventListener('change', syncYieldVisibility);
+  areaInput.addEventListener('input', autoCalcOutput);
+  yieldInput.addEventListener('input', autoCalcOutput);
+  outputInput.addEventListener('input', () => { outputAuto = false; });
 
   function close() {
     overlay.hidden = true;
@@ -485,6 +690,7 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
     filterTo.value = '';
     filterNote.textContent = '';
     exportBtn.disabled = true;
+    excelBtn.disabled = true;
   }
 
   function filteredEntries() {
@@ -509,6 +715,10 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
     exportBtn.title = entries.length
       ? `Xuất ${entries.length} mục nhật ký ra CSV`
       : 'Không có mục để xuất';
+    excelBtn.disabled = !entries.length;
+    excelBtn.title = entries.length
+      ? `Xuất ${entries.length} mục nhật ký ra Excel (kèm tổng hợp)`
+      : 'Không có mục để xuất';
 
     if (allEntries.length && !entries.length) {
       timelineEl.innerHTML = '';
@@ -525,6 +735,11 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
     renderProcessTimeline(timelineEl, entries, {
       canDelete: true,
       onDelete: deleteEntry,
+      canRate,
+      onRated: async () => {
+        await refresh();
+        if (onChanged) onChanged();
+      },
     });
   }
 
@@ -555,7 +770,11 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
     const entries = filteredEntries();
     if (!entries.length) return;
 
-    const rows = [['Hoạt động', 'Ngày thực hiện', 'Tiêu đề', 'Phương pháp', 'Chi tiết', 'Tệp đính kèm']];
+    const rows = [[
+      'Hoạt động', 'Ngày thực hiện', 'Tiêu đề', 'Phương pháp', 'Chi tiết',
+      'Diện tích (ha)', 'Năng suất (tấn/ha)', 'Sản lượng (tấn)',
+      'Chất lượng (1-5)', 'Nhận xét chất lượng', 'Tệp đính kèm',
+    ]];
     for (const entry of entries) {
       const attachmentUrls = (entry.attachments && entry.attachments.length)
         ? entry.attachments
@@ -566,6 +785,11 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
         entry.title || '',
         entry.method || '',
         entry.details || '',
+        entry.areaHa ?? '',
+        entry.yieldPerHa ?? '',
+        entry.outputTons ?? '',
+        entry.qualityRating ?? '',
+        entry.qualityNote || '',
         attachmentUrls.map((a) => new URL(a.url, location.origin).href).join('; '),
       ]);
     }
@@ -583,6 +807,22 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
     toast(`Đã xuất ${entries.length} mục nhật ký ra CSV.`, 'success');
   }
 
+  async function exportExcel() {
+    const entries = filteredEntries();
+    if (!entries.length || !userId) return;
+    const params = new URLSearchParams({ userId });
+    if (filterSeason.value) params.set('season', filterSeason.value);
+    if (filterActivity.value) params.set('activity', filterActivity.value);
+    if (filterFrom.value) params.set('from', filterFrom.value);
+    if (filterTo.value) params.set('to', filterTo.value);
+    try {
+      await downloadFile(`/process/export?${params.toString()}`, 'nhat-ky.xlsx');
+      toast(`Đã xuất ${entries.length} mục nhật ký ra Excel.`, 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
   async function refresh() {
     if (!userId) return;
     const { data } = await api(`/process?userId=${userId}`);
@@ -591,6 +831,7 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
       filtersEl.hidden = true;
       filterNote.textContent = '';
       exportBtn.disabled = true;
+      excelBtn.disabled = true;
       timelineEl.innerHTML = '';
       const err = document.createElement('div');
       err.className = 'process-empty';
@@ -640,6 +881,7 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
     form.hidden = false;
     addToggle.hidden = true;
     dateInput.value = todayIsoDate();
+    syncYieldVisibility();
     titleInput.focus();
     form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
@@ -656,6 +898,7 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
   }
   filterReset.addEventListener('click', resetFilters);
   exportBtn.addEventListener('click', exportCsv);
+  excelBtn.addEventListener('click', exportExcel);
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -667,6 +910,11 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
       method: methodInput.value.trim(),
       details: detailsInput.value.trim(),
     };
+    if (activitySelect.value === 'harvest') {
+      if (areaInput.value !== '') body.area_ha = Number(areaInput.value);
+      if (yieldInput.value !== '') body.yield_per_ha = Number(yieldInput.value);
+      if (outputInput.value !== '') body.output_tons = Number(outputInput.value);
+    }
     if (pendingAttachments.length) body.attachments = pendingAttachments;
 
     submitBtn.disabled = true;

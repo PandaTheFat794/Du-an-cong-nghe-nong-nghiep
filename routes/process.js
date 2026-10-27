@@ -7,10 +7,12 @@ const {
   getProcessEntries,
   getProcessEntry,
   insertProcessEntry,
+  rateProcessEntry,
   deleteProcessEntry,
   getUserById,
   parseEntryAttachments,
 } = require('../db');
+const { journalWorkbookBuffer, ACTIVITY_LABELS } = require('../excel-export');
 
 const ACTIVITIES = new Set([
   'sowing',
@@ -28,6 +30,23 @@ const METHOD_MAX = 160;
 const DETAILS_MAX = 2000;
 const ATTACHMENT_NAME_MAX = 200;
 const ATTACHMENTS_MAX = 5;
+const QUALITY_NOTE_MAX = 500;
+
+// Năng suất/sản lượng: số không âm, làm tròn 2 chữ số thập phân (null = không nhập)
+const METRICS = [
+  { key: 'area_ha', label: 'Diện tích (ha)', max: 1000000 },
+  { key: 'yield_per_ha', label: 'Năng suất (tấn/ha)', max: 100 },
+  { key: 'output_tons', label: 'Sản lượng (tấn)', max: 10000000 },
+];
+
+function parseMetric(value, label, max) {
+  if (value === undefined || value === null || value === '') return { value: null };
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0 || num > max) {
+    return { error: `${label} phải là số từ 0 đến ${max}` };
+  }
+  return { value: Math.round(num * 100) / 100 };
+}
 
 function isValidCalendarDate(value) {
   if (!DATE_RE.test(value)) return false;
@@ -81,6 +100,59 @@ function parseTargetUser(value) {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
+const SEASON_MONTHS = {
+  'dong-xuan': [12, 1, 2, 3, 4],
+  'he-thu': [5, 6, 7, 8],
+  'thu-dong': [9, 10, 11],
+};
+const SEASON_LABELS = { 'dong-xuan': 'Đông Xuân', 'he-thu': 'Hè Thu', 'thu-dong': 'Thu Đông' };
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Lọc giống client (mùa vụ / hoạt động / khoảng ngày) cho file Excel
+function filterProcessEntries(entries, query) {
+  const season = typeof query.season === 'string' ? query.season : '';
+  const activity = typeof query.activity === 'string' ? query.activity : '';
+  const from = ISO_DATE_RE.test(query.from || '') ? query.from : '';
+  const to = ISO_DATE_RE.test(query.to || '') ? query.to : '';
+  return entries.filter((entry) => {
+    if (season) {
+      const month = Number(String(entry.performedAt || '').slice(5, 7));
+      const months = SEASON_MONTHS[season];
+      if (!months || !months.includes(month)) return false;
+    }
+    if (activity && entry.activity !== activity) return false;
+    if (from && (entry.performedAt || '') < from) return false;
+    if (to && (entry.performedAt || '') > to) return false;
+    return true;
+  });
+}
+
+function describeFilters(query) {
+  const parts = [];
+  if (SEASON_LABELS[query.season]) parts.push(`Mùa vụ: ${SEASON_LABELS[query.season]}`);
+  if (ACTIVITY_LABELS[query.activity]) parts.push(`Hoạt động: ${ACTIVITY_LABELS[query.activity]}`);
+  if (ISO_DATE_RE.test(query.from || '')) parts.push(`Từ ${query.from}`);
+  if (ISO_DATE_RE.test(query.to || '')) parts.push(`Đến ${query.to}`);
+  return parts.length ? parts.join(' · ') : 'Tất cả';
+}
+
+function asciiSlug(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
+function sendXlsx(res, buffer, filename) {
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(Buffer.from(buffer));
+}
+
 /**
  * GET /api/process?userId=<id>
  * - user: chỉ xem nhật ký của chính mình
@@ -103,6 +175,40 @@ router.get('/', requireAuth, (req, res) => {
     return res.status(403).json({ error: 'Bạn không có quyền xem nhật ký canh tác này' });
   }
   res.json({ success: true, entries: getProcessEntries(targetId), user: target });
+});
+
+/**
+ * GET /api/process/export?userId=&season=&activity=&from=&to=
+ * Xuất Excel (.xlsx) nhật ký canh tác: sheet "Nhật ký" + sheet "Tổng hợp"
+ * (diện tích, sản lượng, năng suất trung bình, phân bố chất lượng).
+ * Quyền giống GET /api/process; bộ lọc giống bộ lọc trên giao diện.
+ */
+router.get('/export', requireAuth, async (req, res) => {
+  const targetId = req.user.role === 'user' ? req.user.id : parseTargetUser(req.query.userId);
+  if (!targetId) {
+    return res.status(400).json({ error: 'Thiếu userId hợp lệ' });
+  }
+  const target = getUserById(targetId);
+  if (!target || target.role !== 'user') {
+    return res.status(404).json({ error: 'Không tìm thấy khách hàng' });
+  }
+  if (!canViewProcess(req.user, targetId)) {
+    return res.status(403).json({ error: 'Bạn không có quyền xem nhật ký canh tác này' });
+  }
+
+  const entries = filterProcessEntries(getProcessEntries(targetId), req.query);
+  try {
+    const buffer = await journalWorkbookBuffer({
+      entries,
+      userName: target.display_name,
+      filters: describeFilters(req.query),
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    sendXlsx(res, buffer, `nhat-ky-${asciiSlug(target.display_name) || 'khach'}-${today}.xlsx`);
+  } catch (err) {
+    console.error('Xuất Excel nhật ký lỗi:', err);
+    res.status(500).json({ error: 'Không xuất được file Excel' });
+  }
 });
 
 // POST /api/process: khách hàng tự ghi một mục nhật ký canh tác.
@@ -128,6 +234,14 @@ router.post('/', requireAuth, requireRole('user'), (req, res) => {
   }
   if (details.length > DETAILS_MAX) {
     return res.status(400).json({ error: `Chi tiết tối đa ${DETAILS_MAX} ký tự` });
+  }
+
+  // Diện tích / năng suất / sản lượng (dùng cho mục thu hoạch; để trống được)
+  const metrics = {};
+  for (const metric of METRICS) {
+    const parsed = parseMetric(body[metric.key], metric.label, metric.max);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    metrics[metric.key] = parsed.value;
   }
 
   // Đính kèm: nhận `attachments` [{url, name}] (mới) hoặc `attachment` {url, name} (cũ)
@@ -166,6 +280,9 @@ router.post('/', requireAuth, requireRole('user'), (req, res) => {
     method,
     details,
     attachments: cleanAttachments,
+    areaHa: metrics.area_ha,
+    yieldPerHa: metrics.yield_per_ha,
+    outputTons: metrics.output_tons,
   });
   const entryAttachments = parseEntryAttachments(entry.attachment_url, entry.attachment_name);
   const first = entryAttachments[0] || null;
@@ -183,7 +300,51 @@ router.post('/', requireAuth, requireRole('user'), (req, res) => {
       attachments: entryAttachments,
       attachmentUrl: first ? first.url : null,
       attachmentName: first ? first.name : null,
+      areaHa: entry.area_ha,
+      yieldPerHa: entry.yield_per_ha,
+      outputTons: entry.output_tons,
+      qualityRating: entry.quality_rating,
+      qualityNote: entry.quality_note,
+      qualityRatedAt: entry.quality_rated_at,
       createdAt: entry.created_at,
+    },
+  });
+});
+
+/**
+ * POST /api/process/:id/quality — chỉ admin chấm chất lượng mục nhật ký.
+ * body: { rating: 1..5, note?: string ≤ 500 }
+ * User/partner thấy kết quả khi tải lại nhật ký (kèm realtime process-updated).
+ */
+router.post('/:id/quality', requireAuth, requireRole('admin'), (req, res) => {
+  const entryId = parseTargetUser(req.params.id);
+  if (!entryId) {
+    return res.status(400).json({ error: 'Id nhật ký không hợp lệ' });
+  }
+  const entry = getProcessEntry(entryId);
+  if (!entry) {
+    return res.status(404).json({ error: 'Không tìm thấy mục nhật ký' });
+  }
+  const body = req.body || {};
+  const rating = Number(body.rating);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'Đánh giá chất lượng phải là số nguyên từ 1 đến 5' });
+  }
+  const note = typeof body.note === 'string' ? body.note.trim() : '';
+  if (note.length > QUALITY_NOTE_MAX) {
+    return res.status(400).json({ error: `Nhận xét chất lượng tối đa ${QUALITY_NOTE_MAX} ký tự` });
+  }
+
+  rateProcessEntry(entryId, rating, note);
+  broadcastProcessUpdate(req, entry.user_id, 'rated', entryId);
+  const updated = getProcessEntry(entryId);
+  res.json({
+    success: true,
+    entry: {
+      id: updated.id,
+      qualityRating: updated.quality_rating,
+      qualityNote: updated.quality_note,
+      qualityRatedAt: updated.quality_rated_at,
     },
   });
 });

@@ -203,6 +203,14 @@
   margin-bottom: 1.1rem;
 }
 .stats-head h2 { margin: 0; font-size: 1.25rem; color: var(--text-strong, #1e293b); flex: 1; min-width: 0; }
+.stats-export-btn {
+  flex-shrink: 0;
+  padding: 0.38rem 0.85rem;
+  font-size: 0.76rem;
+  border-radius: 999px;
+  color: #166534; border-color: #bbf7d0; background: #f0fdf4;
+}
+.stats-export-btn:disabled { opacity: 0.5; cursor: progress; transform: none; }
 .stats-range {
   display: flex;
   gap: 0.2rem;
