@@ -5,12 +5,14 @@
    ============================================================ */
 .partner-sidebar {
   width: 290px; flex-shrink: 0;
-  background: var(--surface); border-right: 1px solid var(--border);
+  background: var(--glass);
+  backdrop-filter: blur(18px) saturate(1.08);
+  border-right: 1px solid var(--border);
   height: 100vh; display: flex; flex-direction: column;
 }
 .partner-header {
   padding: 0.85rem 1rem;
-  background: var(--surface);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 252, 255, 0.76));
   border-bottom: 1px solid var(--border);
   position: relative;
   display: flex; align-items: center; justify-content: space-between;
@@ -50,14 +52,14 @@
 .partner-logout { margin: 0.75rem; }
 
 /* ============================== WORKBENCH ============================== */
-.chat-view { flex: 1; display: flex; flex-direction: column; background: var(--bg); min-width: 0; overflow: hidden; }
-.partner-view { position: relative; background: var(--bg); }
+.chat-view { flex: 1; display: flex; flex-direction: column; background: transparent; min-width: 0; overflow: hidden; }
+.partner-view { position: relative; background: transparent; }
 .partner-topbar {
   display: flex; align-items: center; gap: 0.65rem;
   min-height: 68px; /* bằng chiều cao header sidebar "Lộ trình tư vấn" */
   padding: 0.85rem 1.1rem;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(10px);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 251, 255, 0.84));
+  backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
 }
 .partner-customer { flex: 1 1 auto; display: flex; align-items: center; gap: 0.7rem; min-width: 0; }

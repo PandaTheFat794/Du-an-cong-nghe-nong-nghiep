@@ -48,7 +48,8 @@ giao diện phong cách Zalo (xanh dương #0068FF).
 - Lịch sử chat phân trang (50 tin/trang, nút "Tải tin cũ hơn" giữ nguyên vị trí đọc).
 - Trang đăng nhập có 3 nút "Vào nhanh" cho tài khoản demo (Khách hàng / Admin / Partner): bấm là vào thẳng trang của role, không cần gõ mật khẩu.
 - Hiệu ứng nền ambient, empty state động, toast thông báo, avatar chữ cái theo role, đèn trạng thái kết nối, responsive + `prefers-reduced-motion`.
-- Giao diện phong cách **Zalo**: xanh dương #0068FF, bubble tin của mình xanh nhạt chữ tối, bubble đối phương trắng, ô nhập pill + nút gửi tròn, nền chat xám nhạt.
+- Giao diện phong cách **Zalo**: xanh dương #0068FF, bubble tin của mình xanh nhạt chữ tối, bubble đối phương trắng, ô nhập pill + nút gửi tròn.
+- **Nền hiện đại**: aurora gradient xanh dương → indigo → mint rất nhẹ (cố định theo viewport), vùng chat có thêm lưới chấm mờ, sidebar/header dùng kính mờ (glassmorphism) để lộ màu nền.
 - **Lightbox** xem ảnh to: bấm ảnh trong chat hoặc nhật ký để phóng to, đóng bằng × / bấm nền / Esc.
 - **Thông báo**: âm "ping" (Web Audio, không cần file) + số tin chưa đọc trên title tab `(n)` ở cả 3 role khi có tin mới ở luồng đang không mở.
 - Session sống sót qua restart server (SQLite store), tự cấp session id mới khi đăng nhập.

@@ -4,13 +4,14 @@
    ============================================================ */
 .admin-sidebar {
   width: 290px; flex-shrink: 0;
-  background: var(--surface);
+  background: var(--glass);
+  backdrop-filter: blur(18px) saturate(1.08);
   border-right: 1px solid var(--border);
   height: 100vh; display: flex; flex-direction: column;
 }
 .admin-header {
   padding: 1.1rem 1rem;
-  background: var(--surface);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 251, 255, 0.74));
   border-bottom: 1px solid var(--border);
   color: var(--primary);
   display: flex; justify-content: space-between; align-items: center;
