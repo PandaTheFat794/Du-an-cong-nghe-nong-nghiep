@@ -165,7 +165,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll('.partner-item').forEach((el) => el.classList.remove('active'));
     if (itemEl) itemEl.classList.add('active');
     chatTitle.textContent = c.user_name;
-    chatMeta.textContent = 'Nhật ký canh tác và trò chuyện riêng với khách hàng / admin';
+    chatMeta.textContent = 'Nhật ký canh tác và trò chuyện riêng';
     noPartnerMsg.hidden = true;
     tabs.hidden = false;
     processPane.hidden = activeView !== 'process';

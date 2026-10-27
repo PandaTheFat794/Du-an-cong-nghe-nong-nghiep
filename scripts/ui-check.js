@@ -505,6 +505,16 @@ async function headerOverflow(page) {
     assert(Math.abs((searchBox.y + searchBox.height / 2) - (acctBox.y + acctBox.height / 2)) < 6,
       'nút Tài khoản thẳng hàng với nút tìm kiếm',
       `searchY=${Math.round(searchBox.y + searchBox.height / 2)}, acctY=${Math.round(acctBox.y + acctBox.height / 2)}`);
+    const tabsBox = await P.locator('#viewTabs').boundingBox();
+    assert(Math.abs((tabsBox.y + tabsBox.height / 2) - (searchBox.y + searchBox.height / 2)) < 6
+      && tabsBox.x + tabsBox.width <= searchBox.x + 1,
+      '3 tab nằm cùng hàng, ngay bên trái nút tìm kiếm',
+      `tabsRight=${Math.round(tabsBox.x + tabsBox.width)}, searchX=${Math.round(searchBox.x)}, y=${Math.round(tabsBox.y)}`);
+    const partnerHeaderBox = await P.locator('.partner-header').boundingBox();
+    const partnerTopbarBox = await P.locator('.partner-topbar').boundingBox();
+    assert(Math.abs(partnerHeaderBox.height - partnerTopbarBox.height) <= 2,
+      'topbar cao bằng header sidebar "Lộ trình tư vấn"',
+      `header=${partnerHeaderBox.height.toFixed(1)}, topbar=${partnerTopbarBox.height.toFixed(1)}`);
     await acctBtn.click();
     await P.waitForSelector('.partner-topbar .account-panel:visible', { timeout: 3000 });
     ok('partner mở panel Tài khoản từ taskbar');

@@ -164,7 +164,7 @@ Dự án đọc `.env` bằng `dotenv`; biến môi trường trong shell vẫn 
 
 ```bash
 npm run e2e        # 182 test: REST + socket + upload + nhật ký (nhiều ảnh) + 3 luồng chat + phân trang/tìm kiếm/around + rate-limit + session persist + CSRF + security + stats 7/30/90 ngày + Bot AI (toggle, off-hours, bot-unsure, fallback 1/2 + cache)
-npm run ui-check   # 114 check UI trên Edge/Chrome headless (tự spawn server + DB riêng; ghi âm dùng micro giả; dashboard 7/30 ngày, tìm kiếm chat, lightbox, title unread, Bot AI toggle, read receipt, popup hủy liên kết, nút Tài khoản partner trên taskbar)
+npm run ui-check   # 116 check UI trên Edge/Chrome headless (tự spawn server + DB riêng; ghi âm dùng micro giả; dashboard 7/30 ngày, tìm kiếm chat, lightbox, title unread, Bot AI toggle, read receipt, popup hủy liên kết, taskbar partner 1 hàng cân với sidebar)
 ```
 
 - `e2e` chạy server tạm ở port `3100`, DB `data/e2e.db` (luôn xóa trước khi chạy).
