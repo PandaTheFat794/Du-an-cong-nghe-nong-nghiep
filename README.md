@@ -30,7 +30,7 @@ giao diện phong cách Zalo (xanh dương #0068FF).
 
 **Admin**
 - Sidebar danh sách khách hàng: 4 thẻ tổng quan (khách hàng, tin khách chưa đọc, tin partner chưa đọc, mục nhật ký), ô tìm kiếm theo tên/tên đăng nhập, preview tin cuối, badge đỏ, badge vàng, số mục nhật ký, xóa khách. Số liệu badge/tổng quan cập nhật realtime.
-- Chat realtime nhiều cuộc hội thoại; mỗi khách có 2 tab riêng: "Khách hàng" và "Partner: <tên>"; gán partner bằng dropdown, **hủy liên kết** partner (có xác nhận), đổi mật khẩu. Tìm kiếm trong lịch sử từng luồng chat.
+- Chat realtime nhiều cuộc hội thoại; mỗi khách có 2 tab riêng: "Khách hàng" và "Partner: <tên>"; gán partner bằng dropdown, **hủy liên kết** partner qua **popup xác nhận** (không dùng hộp thoại mặc định của trình duyệt), đổi mật khẩu. Tìm kiếm trong lịch sử từng luồng chat.
 - Xem nhật ký canh tác của từng khách trong drawer; lọc theo hoạt động/khoảng ngày/mùa vụ, xuất CSV, cập nhật mới hiện realtime.
 - Badge đỏ chỉ đếm tin khách trong luồng admin↔khách; badge vàng chỉ đếm tin partner trong luồng partner↔admin (watermark id tin, không đếm tin mình gửi).
 - **Dashboard Thống kê** (nút "Thống kê"): chọn khoảng **7 / 30 / 90 ngày**; KPI (khách hàng, tin nhắn, mục nhật ký, partner), biểu đồ cột tin nhắn theo ngày, biểu đồ tròn hoạt động nhật ký theo màu, top 5 khách nhắn nhiều nhất trong khoảng đã chọn.
@@ -39,6 +39,7 @@ giao diện phong cách Zalo (xanh dương #0068FF).
 **Partner (bên thứ ba)**
 - Chỉ thấy khách được admin gán; mở sẵn khách đầu tiên, theo dõi **nhật ký canh tác**.
 - Ba tab: "Nhật ký canh tác" (timeline + ảnh), "Nhắn khách hàng" và "Nhắn admin" — hai luồng chat riêng biệt, không nhìn thấy chat admin↔khách; tìm kiếm trong lịch sử từng luồng.
+- Nút **Tài khoản** (đổi mật khẩu) nằm trên taskbar đầu trang, cạnh nút tìm kiếm; panel xổ xuống thẳng hàng.
 - Không tạo/xóa được nhật ký; server chặn thao tác ghi nhật ký ở REST. Quyền chat bị thu hồi ngay khi khách được gán partner khác hoặc admin hủy liên kết.
 
 **Chung**
@@ -163,7 +164,7 @@ Dự án đọc `.env` bằng `dotenv`; biến môi trường trong shell vẫn 
 
 ```bash
 npm run e2e        # 182 test: REST + socket + upload + nhật ký (nhiều ảnh) + 3 luồng chat + phân trang/tìm kiếm/around + rate-limit + session persist + CSRF + security + stats 7/30/90 ngày + Bot AI (toggle, off-hours, bot-unsure, fallback 1/2 + cache)
-npm run ui-check   # 110 check UI trên Edge/Chrome headless (tự spawn server + DB riêng; ghi âm dùng micro giả; dashboard 7/30 ngày, tìm kiếm chat, lightbox, title unread, Bot AI toggle, read receipt)
+npm run ui-check   # 114 check UI trên Edge/Chrome headless (tự spawn server + DB riêng; ghi âm dùng micro giả; dashboard 7/30 ngày, tìm kiếm chat, lightbox, title unread, Bot AI toggle, read receipt, popup hủy liên kết, nút Tài khoản partner trên taskbar)
 ```
 
 - `e2e` chạy server tạm ở port `3100`, DB `data/e2e.db` (luôn xóa trước khi chạy).

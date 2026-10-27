@@ -18,6 +18,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   const partnerSelect = document.getElementById('partnerSelect');
   const connectPartnerBtn = document.getElementById('connectPartnerBtn');
   const disconnectPartnerBtn = document.getElementById('disconnectPartnerBtn');
+  const disconnectOverlay = document.getElementById('disconnectOverlay');
+  const disconnectDesc = document.getElementById('disconnectDesc');
+  const disconnectCancelBtn = document.getElementById('disconnectCancelBtn');
+  const disconnectConfirmBtn = document.getElementById('disconnectConfirmBtn');
   const partnerChip = document.getElementById('partnerChip');
   const partnerChipName = document.getElementById('partnerChipName');
   const botToggleWrap = document.getElementById('botToggleWrap');
@@ -378,24 +382,49 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  disconnectPartnerBtn.addEventListener('click', async () => {
+  // Hộp thoại xác nhận hủy liên kết (thay confirm() mặc định của trình duyệt)
+  function openDisconnectDialog() {
     if (!selectedUser || !selectedUser.partner_id) return;
-    if (!confirm(`Bạn có muốn hủy liên kết với partner "${selectedUser.partner_name || ''}" của khách hàng này không?`)) return;
-    const { data } = await api(`/admin/conversations/${selectedUser.conversation_id}/disconnect`, {
-      method: 'POST',
-    });
-    if (data && data.success) {
-      selectedUser.partner_id = null;
-      selectedUser.partner_name = '';
-      selectedUser.partner_conversation_id = null;
-      if (activeThread === 'partner') activeThread = 'user';
-      toast('Đã hủy liên kết Partner.', 'success');
-      await loadUsers();
-      renderPartnerControl(null, '');
-      updateThreadTabs();
-      await openThread(activeThread);
-    } else {
-      toast((data && data.error) || 'Không hủy được liên kết', 'error');
+    disconnectDesc.textContent = `Partner "${selectedUser.partner_name || ''}" sẽ mất quyền xem nhật ký canh tác và nhắn tin với "${selectedUser.display_name}". Lịch sử trò chuyện vẫn được giữ lại.`;
+    disconnectOverlay.hidden = false;
+    disconnectCancelBtn.focus();
+  }
+  function closeDisconnectDialog(restoreFocus = true) {
+    disconnectOverlay.hidden = true;
+    if (restoreFocus && !disconnectPartnerBtn.hidden) disconnectPartnerBtn.focus();
+  }
+  disconnectPartnerBtn.addEventListener('click', openDisconnectDialog);
+  disconnectCancelBtn.addEventListener('click', () => closeDisconnectDialog());
+  disconnectOverlay.addEventListener('click', (e) => {
+    if (e.target === disconnectOverlay) closeDisconnectDialog();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !disconnectOverlay.hidden) closeDisconnectDialog();
+  });
+  disconnectConfirmBtn.addEventListener('click', async () => {
+    if (!selectedUser || !selectedUser.partner_id) return closeDisconnectDialog();
+    disconnectConfirmBtn.disabled = true;
+    try {
+      const { data } = await api(`/admin/conversations/${selectedUser.conversation_id}/disconnect`, {
+        method: 'POST',
+      });
+      if (data && data.success) {
+        selectedUser.partner_id = null;
+        selectedUser.partner_name = '';
+        selectedUser.partner_conversation_id = null;
+        if (activeThread === 'partner') activeThread = 'user';
+        toast('Đã hủy liên kết Partner.', 'success');
+        await loadUsers();
+        renderPartnerControl(null, '');
+        updateThreadTabs();
+        await openThread(activeThread);
+        closeDisconnectDialog(false);
+        connectPartnerBtn.focus();
+      } else {
+        toast((data && data.error) || 'Không hủy được liên kết', 'error');
+      }
+    } finally {
+      disconnectConfirmBtn.disabled = false;
     }
   });
 

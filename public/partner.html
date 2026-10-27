@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="/css/process.css">
   <link rel="stylesheet" href="/css/partner.css">
 </head>
-<body class="page-partner" data-account-controls="headerControls">
+<body class="page-partner" data-account-controls="topbarControls">
   <div id="root">
     <div class="partner-sidebar">
       <div class="partner-header">
@@ -26,7 +26,6 @@
             <span class="user-name" id="partnerName"></span>
           </div>
         </div>
-        <div class="chat-controls" id="headerControls"></div>
       </div>
       <div class="partner-list" id="partnerList"></div>
       <button class="chat-btn partner-logout" id="logoutBtn" type="button">Đăng xuất</button>
@@ -55,9 +54,12 @@
             Nhắn admin
           </button>
         </div>
-        <button class="chat-btn search-toggle-btn" id="searchToggleBtn" type="button" title="Tìm trong lịch sử chat" aria-label="Tìm kiếm tin nhắn" aria-expanded="false">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        </button>
+        <div class="partner-topbar-actions">
+          <button class="chat-btn search-toggle-btn" id="searchToggleBtn" type="button" title="Tìm trong lịch sử chat" aria-label="Tìm kiếm tin nhắn" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          </button>
+          <div class="partner-account-slot" id="topbarControls"></div>
+        </div>
       </header>
 
       <div class="partner-stage">

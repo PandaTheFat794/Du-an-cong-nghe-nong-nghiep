@@ -158,6 +158,20 @@
     </div>
   </div>
 
+  <div class="confirm-overlay" id="disconnectOverlay" hidden>
+    <div class="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="disconnectTitle" aria-describedby="disconnectDesc">
+      <div class="confirm-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18.84 12.25 1.72-1.71a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="m5.17 11.75-1.71 1.71a5 5 0 0 0 7.07 7.07l1.71-1.71"/><line x1="8" x2="8" y1="2" y2="5"/><line x1="2" x2="5" y1="8" y2="8"/><line x1="16" x2="16" y1="19" y2="22"/><line x1="19" x2="22" y1="16" y2="16"/></svg>
+      </div>
+      <h3 id="disconnectTitle">Hủy liên kết Partner?</h3>
+      <p id="disconnectDesc"></p>
+      <div class="confirm-actions">
+        <button class="chat-btn confirm-cancel" id="disconnectCancelBtn" type="button">Giữ liên kết</button>
+        <button class="confirm-danger" id="disconnectConfirmBtn" type="button">Hủy liên kết</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/ws/socket.io.js"></script>
   <script src="/js/common.js"></script>
   <script src="/js/process.js"></script>

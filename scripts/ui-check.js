@@ -404,13 +404,19 @@ async function headerOverflow(page) {
     await A.waitForTimeout(450);
     await A.screenshot({ path: SHOT('04-admin-da-gan-partner.png') });
 
-    // ===== Admin hủy liên kết partner qua UI (dialog xác nhận) =====
-    const dialogP = new Promise((resolve) => {
-      A.once('dialog', async (d) => { resolve(d.message()); await d.accept(); });
-    });
+    // ===== Admin hủy liên kết partner qua UI (popup xác nhận) =====
     await A.click('#disconnectPartnerBtn');
-    const dialogMsg = await dialogP;
-    assert(/hủy liên kết/i.test(dialogMsg), 'bấm Hủy liên kết → dialog xác nhận hiện ra', dialogMsg);
+    await A.waitForSelector('#disconnectOverlay:visible', { timeout: 3000 });
+    const dcTitle = await A.locator('#disconnectTitle').innerText();
+    assert(/hủy liên kết/i.test(dcTitle), 'bấm Hủy liên kết → popup xác nhận hiện ra', dcTitle);
+    await A.waitForTimeout(350);
+    await A.screenshot({ path: SHOT('04b-admin-popup-huy-lien-ket.png') });
+    await A.keyboard.press('Escape');
+    await A.waitForSelector('#disconnectOverlay', { state: 'hidden', timeout: 3000 });
+    ok('🔍 Esc đóng popup hủy liên kết');
+    await A.click('#disconnectPartnerBtn');
+    await A.waitForSelector('#disconnectOverlay:visible', { timeout: 3000 });
+    await A.click('#disconnectConfirmBtn');
     const dcToast = A.locator('.toast', { hasText: /hủy liên kết/i });
     await dcToast.waitFor({ state: 'visible', timeout: 5000 });
     await A.waitForSelector('#partnerChip', { state: 'hidden', timeout: 5000 });
@@ -489,6 +495,21 @@ async function headerOverflow(page) {
     await P.waitForSelector('.partner-item');
     const itemTxt = await P.locator('.partner-item').first().innerText();
     assert(itemTxt.includes('Khách hàng Test') && /nhật ký/i.test(itemTxt), 'partner thấy khách được gán kèm số nhật ký', itemTxt.replace(/\n/g, ' · '));
+
+    // Nút Tài khoản nằm trên taskbar đầu trang, cạnh nút tìm kiếm và thẳng hàng
+    const acctBtn = P.locator('.partner-topbar button.chat-btn', { hasText: 'Tài khoản' });
+    assert(await acctBtn.count() === 1 && await P.locator('.partner-header button', { hasText: 'Tài khoản' }).count() === 0,
+      'nút Tài khoản nằm trên taskbar cạnh nút tìm kiếm (không còn ở sidebar)');
+    const searchBox = await P.locator('#searchToggleBtn').boundingBox();
+    const acctBox = await acctBtn.boundingBox();
+    assert(Math.abs((searchBox.y + searchBox.height / 2) - (acctBox.y + acctBox.height / 2)) < 6,
+      'nút Tài khoản thẳng hàng với nút tìm kiếm',
+      `searchY=${Math.round(searchBox.y + searchBox.height / 2)}, acctY=${Math.round(acctBox.y + acctBox.height / 2)}`);
+    await acctBtn.click();
+    await P.waitForSelector('.partner-topbar .account-panel:visible', { timeout: 3000 });
+    ok('partner mở panel Tài khoản từ taskbar');
+    await P.click('#partnerChatTitle');
+    await P.waitForSelector('.partner-topbar .account-panel', { state: 'hidden', timeout: 3000 });
 
     await P.waitForSelector('.partner-item.active', { timeout: 5000 });
     const defaultTab = await P.locator('.view-tab.active').innerText();

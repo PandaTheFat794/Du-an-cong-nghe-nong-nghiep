@@ -113,6 +113,46 @@
 .disconnect-btn:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger); }
 .partner-select:focus { outline: none; border-color: var(--primary); }
 
+/* ============================== POPUP XÁC NHẬN ============================== */
+.confirm-overlay {
+  position: fixed; inset: 0; z-index: 88;
+  display: flex; align-items: center; justify-content: center;
+  padding: 1.2rem;
+  background: rgba(10, 20, 40, 0.55);
+  backdrop-filter: blur(4px);
+  animation: overlayIn 0.18s ease;
+}
+.confirm-modal {
+  width: min(430px, 100%);
+  background: var(--surface, #fff);
+  border-radius: 20px;
+  padding: 1.5rem 1.4rem 1.3rem;
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.35);
+  text-align: center;
+  animation: statsIn 0.22s ease;
+}
+.confirm-icon {
+  width: 52px; height: 52px; margin: 0 auto 0.85rem;
+  border-radius: 16px;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, #fff7ed, #ffedd5);
+  color: #d97706; border: 1px solid #fed7aa;
+}
+.confirm-icon svg { width: 25px; height: 25px; }
+.confirm-modal h3 { margin: 0 0 0.45rem; font-size: 1.1rem; color: var(--ink, #1e293b); letter-spacing: -0.01em; }
+.confirm-modal p { margin: 0 0 1.15rem; font-size: 0.86rem; line-height: 1.55; color: var(--muted, #64748b); }
+.confirm-actions { display: flex; gap: 0.6rem; }
+.confirm-actions .chat-btn { flex: 1; justify-content: center; padding: 0.5rem 0.9rem; }
+.confirm-danger {
+  flex: 1; padding: 0.52rem 0.9rem;
+  border: 1.5px solid transparent; border-radius: 20px;
+  background: var(--danger, #dc2626); color: #fff;
+  font-size: 0.84rem; font-weight: 700; font-family: inherit; cursor: pointer;
+  transition: all var(--dur-fast);
+}
+.confirm-danger:hover:not(:disabled) { background: #b91c1c; transform: translateY(-1px); box-shadow: 0 8px 18px rgba(220, 38, 38, 0.28); }
+.confirm-danger:disabled { opacity: 0.6; cursor: progress; transform: none; }
+
 /* Badge số nhật ký trong sidebar admin */
 .user-process-count {
   display: inline-flex; align-items: center; gap: 0.3rem;
