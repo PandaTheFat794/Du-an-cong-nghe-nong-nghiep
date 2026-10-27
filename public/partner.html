@@ -8,20 +8,24 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/chat.css">
+  <link rel="stylesheet" href="/css/process.css">
+  <link rel="stylesheet" href="/css/partner.css">
 </head>
 <body class="page-partner" data-account-controls="headerControls">
   <div id="root">
     <div class="partner-sidebar">
       <div class="partner-header">
-        <h1>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/>
-            <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
-          </svg>
-          Lộ trình tư vấn
-        </h1>
-        <span class="user-name" id="partnerName"></span>
+        <div class="partner-brand">
+          <span class="partner-brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg>
+          </span>
+          <div class="partner-brand-text">
+            <h1>Lộ trình tư vấn</h1>
+            <span class="user-name" id="partnerName"></span>
+          </div>
+        </div>
         <div class="chat-controls" id="headerControls"></div>
       </div>
       <div class="partner-list" id="partnerList"></div>
@@ -38,7 +42,7 @@
           </div>
         </div>
         <div class="view-tabs" id="viewTabs" role="tablist" aria-label="Chế độ xem khách hàng" hidden>
-          <button class="view-tab active" data-view="process" role="tab" aria-selected="true" type="button">
+          <button class="view-tab active" data-view="process" role="tab" aria-selected="true" tabindex="0" type="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg>
             Nhật ký canh tác
           </button>
@@ -51,6 +55,9 @@
             Nhắn admin
           </button>
         </div>
+        <button class="chat-btn search-toggle-btn" id="searchToggleBtn" type="button" title="Tìm trong lịch sử chat" aria-label="Tìm kiếm tin nhắn" aria-expanded="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        </button>
       </header>
 
       <div class="partner-stage">
@@ -68,6 +75,16 @@
         </section>
 
         <section class="chat-pane" id="chatPane" hidden>
+          <div class="chat-search-anchor">
+            <div class="chat-search" id="chatSearch" hidden>
+              <div class="chat-search-bar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                <input type="search" id="chatSearchInput" placeholder="Tìm trong cuộc trò chuyện..." autocomplete="off" aria-label="Từ khóa tìm kiếm tin nhắn">
+                <button class="chat-search-close" id="chatSearchClose" type="button" aria-label="Đóng tìm kiếm">×</button>
+              </div>
+              <ul class="chat-search-results" id="chatSearchResults" hidden></ul>
+            </div>
+          </div>
           <button class="load-more" id="loadMoreBtn" type="button" hidden>Tải tin cũ hơn</button>
           <div class="messages-area" id="partnerMessages"></div>
           <div class="attach-chip" id="attachChip"></div>
@@ -80,7 +97,7 @@
             </button>
             <input type="file" id="attachInput" hidden accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx">
             <input class="input-field" id="msgInput" type="text" placeholder="Nhắn riêng cho khách hàng..." autocomplete="off">
-            <button class="input-btn" id="sendBtn">Gửi
+            <button class="input-btn" id="sendBtn" aria-label="Gửi" title="Gửi">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
             </button>
           </div>

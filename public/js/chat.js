@@ -45,11 +45,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   let processRefreshTimer = null;
 
   // 2. Lịch sử tin nhắn (REST, phân trang: nút "Tải tin cũ hơn" khi còn)
+  let seenWatermark = 0; // mốc "bên kia đã đọc" của thread đang mở (nhãn Đã xem)
   const pager = createHistoryPager(
     messagesArea,
     document.getElementById('loadMoreBtn'),
-    (msg) => messageEl(msg, msg.senderId === myUser.id)
+    (msg) => messageEl(msg, msg.senderId === myUser.id),
+    () => applySeenStatus(messagesArea, seenWatermark, myUser.role)
   );
+
+  // Tìm trong lịch sử của thread đang mở; click kết quả → nhảy tới tin đó
+  const chatSearch = wireChatSearch({
+    toggleBtn: document.getElementById('searchToggleBtn'),
+    panel: document.getElementById('chatSearch'),
+    input: document.getElementById('chatSearchInput'),
+    results: document.getElementById('chatSearchResults'),
+    closeBtn: document.getElementById('chatSearchClose'),
+    getConvId: () => activeConvId,
+    onJump: (id) => pager.jumpAround(id),
+  });
 
   function scrollBottom() {
     messagesArea.scrollTop = messagesArea.scrollHeight;
@@ -60,6 +73,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const active = btn.dataset.thread === activeThread;
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      btn.tabIndex = active ? 0 : -1;
     }
   }
 
@@ -80,22 +94,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     msgInput.placeholder = thread.placeholder;
     typingView.hide();
     pendingSends.clear();
+    botStreams.clear();
     voice?.cancel();
     pager.reset();
+    chatSearch.reset();
 
     socket.emit('join', { convId: thread.convId });
-    await pager.open(thread.convId);
-    if (activeConvId === thread.convId) scrollBottom();
+    const data = await pager.open(thread.convId);
+    if (activeConvId === thread.convId) {
+      // Bên kia của cả 2 thread (admin/partner) ghi mốc đọc vào admin_last_read_id
+      seenWatermark = data && data.conversation ? data.conversation.admin_last_read_id || 0 : 0;
+      applySeenStatus(messagesArea, seenWatermark, myUser.role);
+      scrollBottom();
+      socket.emit('read', { convId: thread.convId });
+    }
   }
 
   for (const btn of tabButtons) {
     btn.addEventListener('click', () => openThread(btn.dataset.thread));
   }
+  wireTablist('threadTabs', (btn) => openThread(btn.dataset.thread));
 
   const socket = io({ path: '/ws', query: { sessionId: getSessionId() } });
   const typing = createTypingSender(socket, () => activeConvId);
   const typingView = createTypingView(messagesArea, scrollBottom);
   const pendingSends = new Map(); // clientId → bubble "đang gửi" chờ server xác nhận
+  const botStreams = new Map(); // clientId → bubble bot đang trả lời (stream)
   wireConnectionIndicator(socket, document.getElementById('connDot'));
 
   // Vào cả 2 phòng để nhận tin realtime từ luồng còn lại (kèm chấm báo tin mới)
@@ -107,6 +131,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (pending) {
       pending.el.remove(); // thay bubble tạm bằng tin thật từ server
       pendingSends.delete(msg.clientId);
+    }
+    const stream = msg.clientId && botStreams.get(msg.clientId);
+    if (stream) {
+      stream.el.remove(); // bot đã trả lời xong → thay bubble stream bằng tin thật
+      botStreams.delete(msg.clientId);
     }
     if (msg.convId !== activeConvId) {
       if (msg.senderId === myUser.id) return;
@@ -121,6 +150,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     typingView.hide();
     messagesArea.appendChild(messageEl(msg, msg.senderId === myUser.id));
+    scrollBottom();
+    // Đang mở thread → xem được ngay, báo server để bên kia thấy "Đã xem"
+    if (msg.senderId !== myUser.id) socket.emit('read', { convId: msg.convId });
+  });
+  // Bên kia (admin/partner) đã đọc thread đang mở → hiện "Đã xem" cho tin của mình
+  socket.on('read-by', (d) => {
+    if (d.convId !== activeConvId || d.userSide) return;
+    applySeenStatus(messagesArea, d.seenUpTo, myUser.role);
+  });
+  // Bot chuyên gia đang trả lời: hiện bubble stream từng cụm chữ
+  socket.on('bot-stream', (d) => {
+    if (d.convId !== activeConvId) return;
+    typingView.hide();
+    let stream = botStreams.get(d.clientId);
+    if (!stream) {
+      stream = botStreamRow('Trợ lý AI');
+      botStreams.set(d.clientId, stream);
+      messagesArea.appendChild(stream.el);
+    }
+    if (d.reset) stream.reset();
+    else stream.append(d.delta);
     scrollBottom();
   });
   socket.on('typing', (d) => {

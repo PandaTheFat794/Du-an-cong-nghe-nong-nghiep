@@ -32,11 +32,24 @@ document.addEventListener('DOMContentLoaded', async () => {
   let voice = null; // bộ ghi âm tin nhắn thoại
   const convOwners = new Map(); // convId → { userId, view } để định tuyến tin nhắn/số đếm
 
+  let seenWatermark = 0; // mốc "bên kia đã đọc" của luồng đang mở (nhãn Đã xem)
   const pager = createHistoryPager(
     messagesEl,
     document.getElementById('loadMoreBtn'),
-    (msg) => messageEl(msg, msg.senderId === myUser.id)
+    (msg) => messageEl(msg, msg.senderId === myUser.id),
+    () => applySeenStatus(messagesEl, seenWatermark, 'partner')
   );
+
+  // Tìm trong lịch sử của thread đang mở; click kết quả → nhảy tới tin đó
+  const chatSearch = wireChatSearch({
+    toggleBtn: document.getElementById('searchToggleBtn'),
+    panel: document.getElementById('chatSearch'),
+    input: document.getElementById('chatSearchInput'),
+    results: document.getElementById('chatSearchResults'),
+    closeBtn: document.getElementById('chatSearchClose'),
+    getConvId: () => activeConvId,
+    onJump: (id) => pager.jumpAround(id),
+  });
   const typingView = createTypingView(messagesEl, scrollBottom);
   const pendingSends = new Map();
 
@@ -92,20 +105,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     typingView.hide();
     pendingSends.clear();
     voice?.cancel();
+    chatSearch.reset();
     if (socket) socket.emit('join', { convId });
-    await pager.open(convId);
-    if (activeConvId === convId) scrollBottom();
+    const data = await pager.open(convId);
+    if (activeConvId === convId) {
+      // Trong partner_user partner đóng vai admin-side; partner_admin là user-side
+      const myUserSide = view === 'admin';
+      seenWatermark = data && data.conversation
+        ? (myUserSide ? data.conversation.admin_last_read_id : data.conversation.user_last_read_id) || 0
+        : 0;
+      applySeenStatus(messagesEl, seenWatermark, 'partner');
+      scrollBottom();
+      if (socket) socket.emit('read', { convId });
+    }
   }
 
   async function setView(view) {
     const next = view === 'customer' || view === 'admin' ? view : 'process';
     if (next !== 'process' && !selectedCustomer) return;
     voice?.cancel();
+    chatSearch.reset();
     activeView = next;
     for (const btn of tabButtons) {
       const active = btn.dataset.view === activeView;
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      btn.tabIndex = active ? 0 : -1;
     }
     processPane.hidden = activeView !== 'process';
     chatPane.hidden = activeView === 'process';
@@ -118,6 +143,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   for (const btn of tabButtons) {
     btn.addEventListener('click', () => setView(btn.dataset.view));
   }
+  wireTablist('viewTabs', (btn) => setView(btn.dataset.view));
   document.getElementById('refreshProcessBtn').addEventListener('click', () => {
     processTimeline.dataset.ready = '';
     loadProcess();
@@ -148,6 +174,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     typingView.hide();
     pendingSends.clear();
     voice?.cancel();
+    chatSearch.reset();
     processTimeline.dataset.ready = '';
 
     // Join cả 2 phòng riêng để nhận tin realtime kể cả khi đang xem tab khác
@@ -215,6 +242,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       typingView.hide();
       messagesEl.appendChild(messageEl(msg, msg.senderId === myUser.id));
       scrollBottom();
+      // Đang mở luồng → xem được ngay, báo server để bên kia thấy "Đã xem"
+      if (msg.senderId !== myUser.id && socket) socket.emit('read', { convId: msg.convId });
       return;
     }
     // Tin đến luồng khác → đếm lên title tab + chấm đỏ/toast nếu là khách đang mở
@@ -231,6 +260,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (activeView === 'process' || d.convId !== activeConvId || d.userId === myUser.id) return;
     if (d.isTyping) typingView.show();
     else typingView.hide();
+  });
+  // Bên kia đã đọc luồng đang mở → hiện "Đã xem" cho tin partner đã gửi
+  socket.on('read-by', (d) => {
+    if (d.convId !== activeConvId) return;
+    const myUserSide = activeView === 'admin';
+    if (d.userSide === myUserSide) return;
+    applySeenStatus(messagesEl, d.seenUpTo, 'partner');
   });
   socket.on('process-updated', (d) => {
     updateItemCounts(d.userId, d.action === 'created' ? 1 : -1, 0);

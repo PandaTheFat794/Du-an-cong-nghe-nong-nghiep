@@ -16,6 +16,29 @@ db.pragma('busy_timeout = 5000');
 // Bật ràng buộc khóa ngoại để DELETE user tự cascade sang conversations/messages
 db.pragma('foreign_keys = ON');
 
+/**
+ * Nhật ký canh tác: attachment_url lưu URL đơn (dữ liệu cũ / 1 tệp) hoặc chuỗi
+ * JSON `[{url, name}, ...]` (nhiều tệp). Trả về mảng chuẩn hóa [{url, name}].
+ */
+function parseEntryAttachments(url, name) {
+  if (!url) return [];
+  const raw = String(url);
+  if (raw.startsWith('[')) {
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        return arr
+          .filter((a) => a && typeof a.url === 'string')
+          .map((a) => ({ url: a.url, name: typeof a.name === 'string' ? a.name : '' }));
+      }
+    } catch {
+      // JSON hỏng → coi như không có đính kèm
+      return [];
+    }
+  }
+  return [{ url: raw, name: name || '' }];
+}
+
 // Bảng users: id, username (unique), password_hash, display_name, role, created_at
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -38,6 +61,8 @@ const CONVERSATIONS_SCHEMA = `
     user_id INTEGER NOT NULL,
     partner_id INTEGER,
     admin_last_read_id INTEGER NOT NULL DEFAULT 0,
+    user_last_read_id INTEGER NOT NULL DEFAULT 0,
+    bot_enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (partner_id) REFERENCES users(id) ON DELETE SET NULL
@@ -68,6 +93,11 @@ if (!existingConvTable) {
     db.exec('ALTER TABLE conversations DROP COLUMN admin_read_at');
   }
 
+  // Bot chuyên gia: cột bật/tắt bot cho thread user_admin (mặc định bật)
+  if (!convColumns.includes('bot_enabled')) {
+    db.exec('ALTER TABLE conversations ADD COLUMN bot_enabled INTEGER NOT NULL DEFAULT 1');
+  }
+
   // DB cũ có UNIQUE(user_id) → rebuild để một khách có nhiều thread riêng tư.
   if (!convColumns.includes('kind')) {
     db.pragma('foreign_keys = OFF');
@@ -79,14 +109,16 @@ if (!existingConvTable) {
           user_id INTEGER NOT NULL,
           partner_id INTEGER,
           admin_last_read_id INTEGER NOT NULL DEFAULT 0,
+          user_last_read_id INTEGER NOT NULL DEFAULT 0,
+          bot_enabled INTEGER NOT NULL DEFAULT 1,
           created_at TEXT NOT NULL DEFAULT (datetime('now')),
           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
           FOREIGN KEY (partner_id) REFERENCES users(id) ON DELETE SET NULL
         );
       `);
       db.exec(`
-        INSERT INTO conversations_migrated (id, kind, user_id, partner_id, admin_last_read_id, created_at)
-        SELECT id, 'user_admin', user_id, partner_id, admin_last_read_id, created_at FROM conversations
+        INSERT INTO conversations_migrated (id, kind, user_id, partner_id, admin_last_read_id, user_last_read_id, created_at)
+        SELECT id, 'user_admin', user_id, partner_id, admin_last_read_id, 0, created_at FROM conversations
       `);
       db.exec('DROP TABLE conversations');
       db.exec('ALTER TABLE conversations_migrated RENAME TO conversations');
@@ -96,6 +128,13 @@ if (!existingConvTable) {
     if (fkErrors.length) {
       console.error('⚠️ foreign_key_check sau migration conversations:', fkErrors);
     }
+  }
+
+  // "Đã xem": mốc đọc của bên khách/user (user trong user_admin/partner_user,
+  // partner trong partner_admin). admin_last_read_id là mốc bên còn lại.
+  // Bỏ qua khi bảng vừa được rebuild ở trên (bảng mới đã có sẵn cột này).
+  if (!convColumns.includes('user_last_read_id') && convColumns.includes('kind')) {
+    db.exec('ALTER TABLE conversations ADD COLUMN user_last_read_id INTEGER NOT NULL DEFAULT 0');
   }
 }
 
@@ -187,6 +226,16 @@ if (!existingAdmin) {
   console.log('✅ DB seeded: admin/admin123, partner1/admin123, user1/user123');
 }
 
+// User ảo "Trợ lý AI": người gửi của tin bot trong thread user_admin.
+// Role 'bot' không đăng nhập được (hash ngẫu nhiên), không xuất hiện trong
+// danh sách khách của admin (WHERE role='user') và không tạo badge unread.
+const botUser = db.prepare('SELECT id FROM users WHERE username = ?').get('ai-bot');
+if (!botUser) {
+  const bcrypt = require('bcryptjs');
+  db.prepare('INSERT INTO users (username, password_hash, display_name, role) VALUES (?, ?, ?, ?)')
+    .run('ai-bot', bcrypt.hashSync(require('crypto').randomBytes(24).toString('hex'), 4), 'Trợ lý AI', 'bot');
+}
+
 const statements = {
   getUserByUsername: db.prepare('SELECT * FROM users WHERE username = ?'),
   getUserConversation: db.prepare(
@@ -215,17 +264,58 @@ const statements = {
      FROM messages m JOIN users u ON m.sender_id = u.id
      WHERE m.conversation_id = ? AND m.id < ? ORDER BY m.id DESC LIMIT ?`
   ),
+  // Trang tin quanh một tin cụ thể (nhảy tới kết quả tìm kiếm): nửa trước (gồm
+  // tin đích, cũ dần) + nửa sau (mới dần), gộp lại sắp cũ → mới.
+  getMessagesAround: db.prepare(
+    `SELECT * FROM (
+       SELECT m.id, m.sender_id AS senderId, m.content, m.attachment_url AS attachmentUrl,
+              m.attachment_name AS attachmentName, m.created_at AS createdAt,
+              u.display_name AS senderName, u.role AS senderRole
+       FROM messages m JOIN users u ON m.sender_id = u.id
+       WHERE m.conversation_id = ? AND m.id <= ? ORDER BY m.id DESC LIMIT ?
+     )
+     UNION ALL
+     SELECT * FROM (
+       SELECT m.id, m.sender_id AS senderId, m.content, m.attachment_url AS attachmentUrl,
+              m.attachment_name AS attachmentName, m.created_at AS createdAt,
+              u.display_name AS senderName, u.role AS senderRole
+       FROM messages m JOIN users u ON m.sender_id = u.id
+       WHERE m.conversation_id = ? AND m.id > ? ORDER BY m.id ASC LIMIT ?
+     )
+     ORDER BY id ASC`
+  ),
+  searchMessages: db.prepare(
+    `SELECT m.id, m.sender_id AS senderId, m.content, m.attachment_url AS attachmentUrl,
+            m.attachment_name AS attachmentName, m.created_at AS createdAt,
+            u.display_name AS senderName, u.role AS senderRole
+     FROM messages m JOIN users u ON m.sender_id = u.id
+     WHERE m.conversation_id = ?
+       AND (m.content LIKE ? ESCAPE '\\' OR m.attachment_name LIKE ? ESCAPE '\\')
+     ORDER BY m.id DESC LIMIT ?`
+  ),
+  countMessagesOlder: db.prepare(
+    'SELECT COUNT(*) AS c FROM messages WHERE conversation_id = ? AND id < ?'
+  ),
   getMessageById: db.prepare('SELECT * FROM messages WHERE id = ?'),
   insertMessage: db.prepare(
     'INSERT INTO messages (conversation_id, sender_id, content, attachment_url, attachment_name) VALUES (?, ?, ?, ?, ?)'
   ),
-  // Đánh dấu đã đọc = ghi nhận id tin cuối cùng của conversation
-  markAsRead: db.prepare(
-    `UPDATE conversations SET admin_last_read_id = COALESCE(
-       (SELECT MAX(id) FROM messages WHERE conversation_id = conversations.id), 0)
-     WHERE id = ?`
+  // Đánh dấu đã đọc = ghi nhận id tin cuối cùng của conversation cho từng bên
+  lastMessageId: db.prepare(
+    'SELECT COALESCE(MAX(id), 0) AS m FROM messages WHERE conversation_id = ?'
   ),
-  // Chưa đọc = tin của CHÍNH khách hàng sau mốc đã đọc (không tính tin admin tự gửi)
+  markAdminRead: db.prepare(
+    'UPDATE conversations SET admin_last_read_id = ? WHERE id = ?'
+  ),
+  markUserRead: db.prepare(
+    'UPDATE conversations SET user_last_read_id = ? WHERE id = ?'
+  ),
+  // Mọi file được tham chiếu từ tin nhắn + nhật ký (job dọn rác uploads dùng)
+  referencedAttachments: db.prepare(
+    `SELECT attachment_url AS url FROM messages WHERE attachment_url IS NOT NULL
+     UNION ALL
+     SELECT attachment_url AS url FROM process_entries WHERE attachment_url IS NOT NULL`
+  ),  // Chưa đọc = tin của CHÍNH khách hàng sau mốc đã đọc (không tính tin admin tự gửi)
   countUnread: db.prepare(
     `SELECT COUNT(*) AS cnt FROM messages m
      JOIN conversations c ON c.id = m.conversation_id
@@ -239,6 +329,8 @@ const statements = {
        AND c.kind = 'partner_admin' AND m.sender_id = c.partner_id`
   ),
   connectPartner: db.prepare('UPDATE conversations SET partner_id = ? WHERE id = ?'),
+  setBotEnabled: db.prepare('UPDATE conversations SET bot_enabled = ? WHERE id = ?'),
+  getBotUser: db.prepare("SELECT * FROM users WHERE role = 'bot' LIMIT 1"),
   getConversation: db.prepare(
     `SELECT c.*, u.display_name AS user_name, u.role AS user_role,
             p.display_name AS partner_name, p.role AS partner_role
@@ -307,6 +399,8 @@ function canAccessConversation(user, conversation) {
 module.exports = {
   db,
 
+  parseEntryAttachments,
+
   getUserByUsername: (username) => statements.getUserByUsername.get(username),
 
   // Tìm hoặc tạo conversation 1-1 của user với admin (luôn trả về row object)
@@ -328,14 +422,61 @@ module.exports = {
     return { messages: rows.slice(0, limit).reverse(), has_more: hasMore };
   },
 
+  // Tìm tin nhắn theo từ khóa (đã escape wildcard LIKE ở route), mới nhất trước
+  searchMessages: (convId, q, limit = 30) => {
+    const pattern = `%${q}%`;
+    return statements.searchMessages.all(convId, pattern, pattern, limit);
+  },
+
+  // Trang tin quanh tin đích (dùng khi nhảy tới kết quả tìm kiếm)
+  getMessagesAround: (convId, targetId, limit) => {
+    const half = Math.max(1, Math.floor(limit / 2));
+    const rows = statements.getMessagesAround.all(convId, targetId, half, convId, targetId, half);
+    const hasMore = rows.length ? statements.countMessagesOlder.get(convId, rows[0].id).c > 0 : false;
+    return { messages: rows, has_more: hasMore };
+  },
+
   // chèn tin (kèm file đính kèm optional), trả về row đã lưu
   insertMessage: (convId, senderId, content, attachmentUrl = null, attachmentName = null) => {
     const info = statements.insertMessage.run(convId, senderId, content, attachmentUrl, attachmentName);
     return statements.getMessageById.get(info.lastInsertRowid);
   },
 
-  // Đánh dấu admin đã đọc tới tin mới nhất (client gọi khi admin mở chat)
-  markAsRead: (convId) => statements.markAsRead.run(convId),
+  // Đánh dấu một bên đã đọc tới tin mới nhất; trả về mốc id để bắn 'read-by'.
+  // userSide=true → bên khách/user (user trong user_admin/partner_user,
+  // partner trong partner_admin); false → bên admin (admin trong
+  // user_admin/partner_admin, partner trong partner_user).
+  markAsRead: (convId, userSide) => {
+    const seenUpTo = statements.lastMessageId.get(convId).m;
+    if (userSide) statements.markUserRead.run(seenUpTo, convId);
+    else statements.markAdminRead.run(seenUpTo, convId);
+    return seenUpTo;
+  },
+
+  // Tên file đang được messages/process_entries tham chiếu
+  getReferencedAttachmentNames: () => {
+    const names = new Set();
+    for (const row of statements.referencedAttachments.all()) {
+      if (!row.url) continue;
+      const raw = String(row.url);
+      if (raw.startsWith('[')) {
+        // Nhật ký nhiều đính kèm: attachment_url là chuỗi JSON [{url, name}]
+        try {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) {
+            for (const a of arr) {
+              if (a && typeof a.url === 'string') names.add(path.basename(String(a.url).replace(/\\/g, '/')));
+            }
+          }
+        } catch {
+          // JSON hỏng → bỏ qua dòng này
+        }
+      } else {
+        names.add(path.basename(raw.replace(/\\/g, '/')));
+      }
+    }
+    return names;
+  },
 
   // Đếm tin chưa đọc của admin (chỉ tin do khách hàng gửi sau mốc đã đọc)
   countUnread: (convId) => statements.countUnread.get(convId).cnt,
@@ -346,6 +487,10 @@ module.exports = {
   // Gán partner cho conversation
   connectPartner: (convId, partnerId) => statements.connectPartner.run(partnerId, convId),
 
+  // Bật/tắt bot chuyên gia cho thread user_admin của khách
+  setBotEnabled: (convId, enabled) => statements.setBotEnabled.run(enabled ? 1 : 0, convId),
+  getBotUser: () => statements.getBotUser.get(),
+
   // Tạo/tìm thread riêng tư partner↔khách hoặc partner↔admin
   getOrCreatePartnerThread,
   ensurePartnerThreads,
@@ -355,11 +500,34 @@ module.exports = {
   getConversation: (convId) => statements.getConversation.get(convId),
 
   // ===== Nhật ký canh tác =====
-  getProcessEntries: (userId) => statements.getProcessEntries.all(userId),
+  // Kèm attachments (mảng chuẩn hóa [{url, name}]) + attachmentUrl/attachmentName
+  // (đính kèm đầu tiên, giữ tương thích với client/test cũ).
+  getProcessEntries: (userId) => statements.getProcessEntries.all(userId).map((row) => {
+    const attachments = parseEntryAttachments(row.attachmentUrl, row.attachmentName);
+    const first = attachments[0] || null;
+    return {
+      ...row,
+      attachments,
+      attachmentUrl: first ? first.url : null,
+      attachmentName: first ? first.name : null,
+    };
+  }),
 
   getProcessEntry: (id) => statements.getProcessEntry.get(id),
 
+  // attachments: [{url, name}] (route đã validate). 0 → null/null, 1 → URL đơn
+  // (tương thích dữ liệu cũ), ≥2 → chuỗi JSON ở attachment_url.
   insertProcessEntry: (userId, entry) => {
+    const attachments = (entry.attachments || []).filter((a) => a && a.url);
+    let url = null;
+    let name = null;
+    if (attachments.length === 1) {
+      url = attachments[0].url;
+      name = attachments[0].name || null;
+    } else if (attachments.length > 1) {
+      url = JSON.stringify(attachments);
+      name = attachments[0].name || null;
+    }
     const info = statements.insertProcessEntry.run(
       userId,
       entry.activity,
@@ -367,8 +535,8 @@ module.exports = {
       entry.title,
       entry.method || null,
       entry.details || null,
-      entry.attachmentUrl || null,
-      entry.attachmentName || null
+      url,
+      name
     );
     return statements.getProcessEntry.get(info.lastInsertRowid);
   },

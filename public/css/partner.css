@@ -1,0 +1,99 @@
+/* ============================================================
+   partner.css — Giao diện partner (partner.html):
+   sidebar danh sách khách được gán + workbench 3 tab
+   (nhật ký / nhắn khách / nhắn admin)
+   ============================================================ */
+.partner-sidebar {
+  width: 290px; flex-shrink: 0;
+  background: var(--surface); border-right: 1px solid var(--border);
+  height: 100vh; display: flex; flex-direction: column;
+}
+.partner-header {
+  padding: 0.85rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.6rem; flex-wrap: wrap;
+}
+.partner-brand { display: flex; align-items: center; gap: 0.65rem; min-width: 0; }
+.partner-brand-mark {
+  width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, #fbbf24, #d97706);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(217, 119, 6, 0.25);
+}
+.partner-brand-mark svg { width: 22px; height: 22px; }
+.partner-brand-text { min-width: 0; }
+.partner-brand-text h1 { font-size: 0.95rem; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; white-space: nowrap; }
+.partner-brand-text .user-name {
+  display: block; font-size: 0.7rem; font-weight: 600; color: #b45309;
+  margin-top: 0.12rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.partner-header .chat-controls { position: static; }
+.partner-header .chat-btn { background: var(--accent-soft); color: #92400e; border-color: #fde68a; }
+.partner-header .chat-btn:hover { background: #fde68a; border-color: #f59e0b; }
+
+.partner-list { flex: 1; overflow-y: auto; padding: 0.6rem; }
+.partner-item {
+  padding: 0.7rem 0.9rem; border-radius: 12px; cursor: pointer;
+  font-size: 0.85rem; color: var(--ink); font-weight: 500;
+  display: flex; align-items: center; gap: 0.6rem;
+  transition: all var(--dur-fast); margin-bottom: 2px;
+}
+.partner-item .avatar { width: 34px; height: 34px; font-size: 0.72rem; }
+.partner-item:hover { background: var(--accent-soft); transform: translateX(2px); }
+.partner-item.active { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.partner-item-info { display: flex; flex-direction: column; min-width: 0; gap: 0.1rem; }
+.partner-item-name { font-weight: 600; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.partner-item-meta { font-size: 0.68rem; font-weight: 500; color: var(--muted); }
+.partner-item.active .partner-item-meta { color: #92400e; }
+
+.partner-logout { margin: 0.75rem; }
+
+/* ============================== WORKBENCH ============================== */
+.chat-view { flex: 1; display: flex; flex-direction: column; background: var(--bg); min-width: 0; overflow: hidden; }
+.partner-view { position: relative; background: var(--bg); }
+.partner-topbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 0.8rem 1.1rem;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.partner-customer { display: flex; align-items: center; gap: 0.7rem; min-width: 0; }
+.partner-customer-text h2 { font-size: 1rem; color: var(--primary-deep); letter-spacing: -0.01em; }
+.partner-customer-text p { font-size: 0.73rem; color: var(--muted); }
+
+.partner-stage {
+  flex: 1; min-height: 0; position: relative;
+  display: flex; flex-direction: column;
+  padding: 0.9rem;
+  overflow: hidden;
+}
+.partner-empty { margin: auto; }
+.process-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.55rem; overflow: hidden; }
+.process-pane[hidden] { display: none; }
+.partner-process { flex: 1; overflow-y: auto; padding: 0.2rem 0.6rem 1.5rem 0.2rem; }
+.chat-pane {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+}
+.chat-pane[hidden] { display: none; }
+.chat-pane .messages-area { padding: 1rem; }
+.chat-pane .input-area { border-radius: 0 0 17px 17px; }
+.chat-pane .attach-chip { margin-top: 0.35rem; }
+
+.process-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0 0.2rem; }
+.process-live { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.73rem; font-weight: 500; color: var(--muted); }
+.process-live i { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); animation: livePulse 2s infinite; }
+@keyframes livePulse {
+  0% { box-shadow: 0 0 0 0 rgba(0, 104, 255, 0.45); }
+  70% { box-shadow: 0 0 0 8px rgba(0, 104, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 104, 255, 0); }
+}

@@ -1,5 +1,6 @@
 // UI check end-to-end: Edge/Chrome headless, đi qua cả 3 role (user/admin/partner),
-// upload ảnh, realtime, typing, phân quyền trang, panel tài khoản, rate-limit.
+// upload ảnh, realtime, typing, phân quyền trang, panel tài khoản, rate-limit,
+// bot AI (trả lời tự động + toggle từ giao diện admin).
 //
 // Mặc định tự spawn server ở port 3199 với DB riêng (data/ui-check.db) đã xoá sạch
 // → chạy lại nhiều lần vẫn cho kết quả như nhau.
@@ -17,6 +18,18 @@ const SHOT_DIR = process.env.UI_SHOT_DIR || path.join(ROOT, '.verify');
 fs.mkdirSync(SHOT_DIR, { recursive: true });
 const SHOT = (n) => path.join(SHOT_DIR, n);
 const FIXTURE_PNG = path.join(__dirname, 'fixtures', 'attach.png');
+
+// Ngày động cho nhật ký (hôm nay) + bộ lọc (ngày mai) + mùa vụ theo tháng hiện tại
+const pad2 = (n) => String(n).padStart(2, '0');
+const nowD = new Date();
+const ENTRY_DATE = `${nowD.getFullYear()}-${pad2(nowD.getMonth() + 1)}-${pad2(nowD.getDate())}`;
+const tomorrowD = new Date(nowD);
+tomorrowD.setDate(tomorrowD.getDate() + 1);
+const TOMORROW_DATE = `${tomorrowD.getFullYear()}-${pad2(tomorrowD.getMonth() + 1)}-${pad2(tomorrowD.getDate())}`;
+const entryMonth = nowD.getMonth() + 1;
+const ENTRY_SEASON = entryMonth <= 4 || entryMonth === 12 ? 'dong-xuan'
+  : entryMonth <= 8 ? 'he-thu' : 'thu-dong';
+const OTHER_SEASON = ENTRY_SEASON === 'dong-xuan' ? 'he-thu' : 'dong-xuan';
 
 const EXEC_CANDIDATES = [
   process.env.UI_BROWSER,
@@ -46,7 +59,7 @@ function startServer() {
     if (fs.existsSync(f)) fs.unlinkSync(f);
   }
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
-    env: { ...process.env, PORT: String(PORT), DB_PATH, SESSION_SECRET: 'ui-check-secret', NODE_ENV: 'test' },
+    env: { ...process.env, PORT: String(PORT), DB_PATH, SESSION_SECRET: 'ui-check-secret', NODE_ENV: 'test', LLM_PROVIDER: 'off', LLM_FALLBACK_PROVIDER: 'off', OFFICE_HOURS: '0-24', UPLOAD_CLEANUP_INTERVAL_HOURS: '0' },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   child.stderr.pipe(process.stderr);
@@ -137,6 +150,38 @@ async function headerOverflow(page) {
     const uBubble = await U.locator('.message.user').innerText();
     assert(uBubble.includes('vàng lá'), 'user gửi tin → bubble hiện trong chat', uBubble.slice(0, 40));
 
+    // ===== Bot AI trả lời tự động (rule-based fallback, không cần LLM) =====
+    try {
+      await U.waitForSelector('#messagesArea .message.role-bot:not(.bot-streaming)', { timeout: 8000 });
+      ok('🤖 user gửi tin → bot AI trả lời tự động (bubble role-bot)');
+      const botTxt = await U.locator('#messagesArea .message.role-bot').first().innerText();
+      assert(/vàng lá|thiếu đạm|kali|phèn/i.test(botTxt), 'bot trả lời đúng chủ đề vàng lá', botTxt.slice(0, 90));
+      await U.waitForTimeout(350);
+      await U.screenshot({ path: SHOT('01b-user-bot-reply.png') });
+    } catch (e) {
+      bad('bot trả lời tự động', e.message.split('\n')[0]);
+    }
+
+    // 🔍 tìm kiếm trong lịch sử chat
+    await U.click('#searchToggleBtn');
+    await U.waitForSelector('#chatSearch', { state: 'visible', timeout: 3000 });
+    await U.fill('#chatSearchInput', 'vàng lá');
+    await U.waitForSelector('#chatSearchResults .chat-search-item', { timeout: 6000 });
+    const searchHit = await U.locator('#chatSearchResults .chat-search-item').first().innerText();
+    assert(searchHit.includes('vàng lá'), '🔍 tìm "vàng lá" → panel hiện kết quả khớp', searchHit.slice(0, 70));
+    await U.click('#chatSearchResults .chat-search-item');
+    await U.waitForSelector('.message.message-flash', { timeout: 5000 });
+    ok('🔍 click kết quả → nhảy tới đúng tin + highlight nhấp nháy');
+    await U.screenshot({ path: SHOT('01c-user-search.png') });
+
+    await U.click('#searchToggleBtn');
+    await U.fill('#chatSearchInput', 'x');
+    await U.waitForTimeout(450);
+    assert(await U.locator('#chatSearchResults').isHidden(),
+      '🔍 từ khóa 1 ký tự → không gọi API, ẩn kết quả');
+    await U.press('#chatSearchInput', 'Escape');
+    assert(await U.locator('#chatSearch').isHidden(), '🔍 Esc đóng panel tìm kiếm');
+
     const before = await U.locator('.message').count();
     await U.click('#sendBtn');
     await U.waitForTimeout(500);
@@ -147,19 +192,22 @@ async function headerOverflow(page) {
     await U.waitForSelector('.process-overlay.open', { timeout: 4000 });
     await U.click('#processAddToggle');
     await U.selectOption('#processActivity', 'fertilizing');
-    await U.fill('#processDate', '2026-10-20');
+    await U.fill('#processDate', ENTRY_DATE);
     await U.fill('#processTitle', 'Bón lót vụ đông');
     await U.fill('#processMethod', 'Bón vãi');
     await U.fill('#processDetails', 'NPK 20-20-15, 150kg/ha');
-    await U.setInputFiles('#processAttachInput', FIXTURE_PNG);
-    await U.waitForFunction(() => document.getElementById('processAttachChip').textContent.includes('attach.png'), null, { timeout: 8000 });
+    await U.setInputFiles('#processAttachInput', [FIXTURE_PNG, FIXTURE_PNG]);
+    await U.waitForFunction(
+      () => (document.getElementById('processAttachChips').textContent.match(/attach\.png/g) || []).length === 2,
+      null, { timeout: 8000 }
+    );
     await U.click('#processSubmitBtn');
     await U.waitForFunction(
       () => [...document.querySelectorAll('.process-entry-title')].some((el) => el.textContent.includes('Bón lót')),
       null, { timeout: 8000 }
     );
-    assert((await U.locator('.process-entry-media img').count()) >= 1,
-      'user thêm nhật ký kèm ảnh → timeline hiện card + ảnh');
+    assert((await U.locator('.process-entry-media-grid img').count()) === 2,
+      'user thêm nhật ký kèm 2 ảnh → timeline hiện lưới 2 ảnh');
     await U.waitForTimeout(450); // chờ animation stagger của timeline kết thúc
     await U.screenshot({ path: SHOT('04-user-nhat-ky.png') });
     await U.click('#processDrawerClose');
@@ -198,8 +246,8 @@ async function headerOverflow(page) {
 
     await A.click('.user-item');
     await A.waitForSelector('.message.admin', { timeout: 5000 });
-    const histMsg = await A.locator('.message.admin').first().innerText();
-    assert(histMsg.includes('vàng lá'), 'admin mở conv → history có tin của user', histMsg.slice(0, 40));
+    const histMsg = await A.locator('#messagesArea .message.role-user').first().innerText();
+    assert(histMsg.includes('vàng lá'), 'admin mở conv → history có tin của user (không nhầm tin bot)', histMsg.slice(0, 40));
 
     await A.waitForFunction(() => {
       const b = document.querySelector('.user-unread:not(.partner)');
@@ -209,6 +257,47 @@ async function headerOverflow(page) {
     assert(!badgeHidden, 'admin mở chat → badge unread bị ẩn (socket read)', `visible=${badgeHidden}`);
     const unreadStatAfterRead = await A.locator('#statUnread').innerText();
     assert(unreadStatAfterRead === '0', 'thẻ "Tin khách chưa đọc" cập nhật về 0 realtime', `stat=${unreadStatAfterRead}`);
+
+    // ===== Bot AI: toggle từ giao diện admin =====
+    await A.waitForSelector('#botToggleWrap:not([hidden])', { timeout: 4000 });
+    assert(await A.locator('#botToggleInput').isChecked(), 'admin thấy toggle Bot AI đang bật cho khách', 'checked=true');
+
+    // Tắt bot → khách nhắn không có hồi âm
+    await A.click('#botToggleWrap');
+    await A.waitForFunction(() => !document.getElementById('botToggleInput').checked, null, { timeout: 4000 });
+    await A.waitForTimeout(400); // chờ POST /bot hoàn tất trước khi khách nhắn
+    ok('admin tắt Bot AI bằng toggle trong header');
+
+    const botCountBefore = await U.locator('#messagesArea .message.role-bot:not(.bot-streaming)').count();
+    await U.fill('#msgInput', 'bot ơi còn sống không?');
+    await U.click('#sendBtn');
+    await U.waitForFunction(
+      () => [...document.querySelectorAll('#messagesArea .message')].some((el) => el.textContent.includes('bot ơi còn sống')),
+      null, { timeout: 5000 }
+    );
+    await U.waitForTimeout(2600);
+    assert((await U.locator('#messagesArea .message.role-bot:not(.bot-streaming)').count()) === botCountBefore,
+      'bot đã tắt → khách nhắn không có hồi âm bot', `vẫn ${botCountBefore} tin bot`);
+
+    // Bật lại → khách nhắn → bot trả lời đúng chủ đề
+    await A.click('#botToggleWrap');
+    await A.waitForFunction(() => document.getElementById('botToggleInput').checked, null, { timeout: 4000 });
+    await A.waitForTimeout(400);
+    ok('admin bật lại Bot AI bằng toggle');
+    await U.fill('#msgInput', 'lúa bị đạo ôn thì phun thuốc gì?');
+    await U.click('#sendBtn');
+    try {
+      await U.waitForFunction(
+        () => [...document.querySelectorAll('#messagesArea .message.role-bot:not(.bot-streaming)')]
+          .some((el) => el.textContent.includes('Tricyclazole') || el.textContent.includes('đạo ôn')),
+        null, { timeout: 10000 }
+      );
+      ok('🤖 bật bot lại → trả lời đúng chủ đề đạo ôn');
+      await U.waitForTimeout(350);
+      await U.screenshot({ path: SHOT('01c-user-bot-daoon.png') });
+    } catch {
+      bad('bot trả lời sau khi bật lại', 'timeout 10s không thấy tin bot đúng chủ đề');
+    }
 
     // ===== Typing indicator: admin soạn → user thấy bubble 3 chấm =====
     await A.locator('#msgInput').pressSequentially('Đang soạn', { delay: 60 });
@@ -234,6 +323,20 @@ async function headerOverflow(page) {
 
     await U.waitForFunction(() => !document.querySelector('.typing-row'), null, { timeout: 4000 })
       .then(() => ok('typing bubble biến mất khi tin gửi tới'), () => bad('typing bubble không bị gỡ', 'vẫn còn .typing-row'));
+
+    // ===== Read receipt: user đã đọc → admin thấy "Đã xem" =====
+    await A.fill('#msgInput', 'đã xem test');
+    await A.click('#sendBtn');
+    try {
+      await A.waitForFunction(
+        () => [...document.querySelectorAll('#messagesArea .message.user')]
+          .some((el) => el.textContent.includes('đã xem test')
+            && el.querySelector('.message-status')?.textContent === 'Đã xem'),
+        null, { timeout: 6000 }
+      );
+      ok('✅ "Đã xem": user đọc tin (thread mở) → admin thấy nhãn Đã xem');
+      await A.screenshot({ path: SHOT('08-da-xem.png') });
+    } catch { bad('read receipt "Đã xem"', 'timeout 6s, không thấy .message-status = "Đã xem" trên bubble admin'); }
 
     // ===== Upload ảnh từ admin =====
     await A.setInputFiles('#attachInput', FIXTURE_PNG);
@@ -301,6 +404,28 @@ async function headerOverflow(page) {
     await A.waitForTimeout(450);
     await A.screenshot({ path: SHOT('04-admin-da-gan-partner.png') });
 
+    // ===== Admin hủy liên kết partner qua UI (dialog xác nhận) =====
+    const dialogP = new Promise((resolve) => {
+      A.once('dialog', async (d) => { resolve(d.message()); await d.accept(); });
+    });
+    await A.click('#disconnectPartnerBtn');
+    const dialogMsg = await dialogP;
+    assert(/hủy liên kết/i.test(dialogMsg), 'bấm Hủy liên kết → dialog xác nhận hiện ra', dialogMsg);
+    const dcToast = A.locator('.toast', { hasText: /hủy liên kết/i });
+    await dcToast.waitFor({ state: 'visible', timeout: 5000 });
+    await A.waitForSelector('#partnerChip', { state: 'hidden', timeout: 5000 });
+    assert(await A.locator('#partnerSelect').isVisible(), 'hủy xong → chip ẩn, select chọn Partner hiện lại');
+    assert(await A.locator('#threadTabs .view-tab[data-thread="partner"]').isHidden(), 'hủy xong → tab chat với partner bị ẩn');
+    await A.waitForSelector('.toast', { state: 'detached', timeout: 6000 });
+    await A.waitForTimeout(450);
+    await A.screenshot({ path: SHOT('04c-admin-huy-lien-ket.png') });
+
+    // Gán lại để các test sau (nhật ký, partner) tiếp tục đúng trạng thái
+    await A.selectOption('#partnerSelect', { label: 'Partner Test' });
+    await A.click('#connectPartnerBtn');
+    await A.waitForSelector('#partnerChip:visible', { timeout: 5000 });
+    await A.waitForSelector('.toast', { state: 'detached', timeout: 6000 });
+
     // ===== Admin xem nhật ký canh tác của khách =====
     await A.click('#processBtn');
     await A.waitForSelector('.process-overlay.open .process-entry', { timeout: 5000 });
@@ -319,13 +444,25 @@ async function headerOverflow(page) {
     // 🔍 lọc khoảng ngày loại mục cũ → vẫn giữ được dữ liệu gốc khi xóa lọc
     await A.click('#processFilterReset');
     await A.waitForSelector('.process-entry', { timeout: 3000 });
-    await A.fill('#processFilterFrom', '2026-10-21');
+    await A.fill('#processFilterFrom', TOMORROW_DATE);
     await A.waitForSelector('.process-empty-filtered', { timeout: 3000 });
     assert((await A.locator('#processFilterNote').innerText()).includes('0/1'),
       '🔍 lọc "Từ ngày" sau ngày ghi → loại đúng mục cũ');
     await A.click('#processFilterReset');
     await A.waitForSelector('.process-entry', { timeout: 3000 });
     ok('xóa lọc → timeline hiện lại đủ mục');
+
+    // 🔍 lọc theo mùa vụ: mục hôm nay thuộc đúng mùa theo tháng hiện tại
+    await A.selectOption('#processFilterSeason', OTHER_SEASON);
+    await A.waitForSelector('.process-empty-filtered', { timeout: 3000 });
+    assert((await A.locator('#processFilterNote').innerText()).includes('0/1'),
+      `🔍 lọc mùa ${OTHER_SEASON} → loại mục thuộc mùa ${ENTRY_SEASON}`);
+    await A.selectOption('#processFilterSeason', ENTRY_SEASON);
+    await A.waitForSelector('.process-entry', { timeout: 3000 });
+    assert((await A.locator('#processFilterNote').innerText()).includes('1/1'),
+      `🔍 lọc mùa ${ENTRY_SEASON} → giữ đúng mục hôm nay`);
+    await A.click('#processFilterReset');
+    await A.waitForSelector('.process-entry', { timeout: 3000 });
 
     // Xuất CSV theo bộ lọc
     const [download] = await Promise.all([
@@ -520,13 +657,29 @@ async function headerOverflow(page) {
       bars: document.querySelectorAll('#barChart .bar-col').length,
       legend: document.querySelectorAll('#donutLegend li').length,
       top: document.getElementById('topCustomers').textContent,
+      msglabel: document.getElementById('kpiMessagesLabel').textContent,
     }));
     assert(kpis.customers === '1' && kpis.messages >= 9 && kpis.process === '1' && kpis.partners === '1',
       'dashboard KPI đúng số liệu (khách=1, tin≥9, nhật ký=1, partner=1)', JSON.stringify(kpis));
     assert(kpis.bars === 7, 'biểu đồ cột có đúng 7 ngày', `bars=${kpis.bars}`);
+    assert(kpis.msglabel.includes('7 ngày'), 'nhãn KPI ghi rõ khoảng 7 ngày', kpis.msglabel);
     assert(kpis.legend >= 1 && kpis.top.includes('Khách hàng Test'),
       'biểu đồ tròn hoạt động + top khách hàng hiển thị', `legend=${kpis.legend}, top="${kpis.top}"`);
     await A.screenshot({ path: SHOT('10-admin-dashboard.png') });
+
+    // 🔍 chuyển khoảng 30 ngày → 30 cột + nhãn đổi
+    await A.click('[data-stats-days="30"]');
+    await A.waitForFunction(() => document.querySelectorAll('#barChart .bar-col').length === 30, null, { timeout: 6000 });
+    const kpis30 = await A.evaluate(() => ({
+      msglabel: document.getElementById('kpiMessagesLabel').textContent,
+      title: document.getElementById('barChartTitle').textContent,
+      active: document.querySelector('.stats-range-btn.is-active').dataset.statsDays,
+    }));
+    assert(kpis30.msglabel.includes('30 ngày') && kpis30.title.includes('30 ngày') && kpis30.active === '30',
+      '🔍 chọn 30 ngày → 30 cột + nhãn/nút active đổi', JSON.stringify(kpis30));
+    await A.click('[data-stats-days="7"]');
+    await A.waitForFunction(() => document.querySelectorAll('#barChart .bar-col').length === 7, null, { timeout: 6000 });
+    ok('🔍 quay về 7 ngày → 7 cột');
     await A.click('#statsCloseBtn');
     await A.waitForSelector('#statsOverlay', { state: 'hidden', timeout: 4000 });
     ok('đóng dashboard bằng nút ×');

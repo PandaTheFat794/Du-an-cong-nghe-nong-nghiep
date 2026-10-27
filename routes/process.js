@@ -9,6 +9,7 @@ const {
   insertProcessEntry,
   deleteProcessEntry,
   getUserById,
+  parseEntryAttachments,
 } = require('../db');
 
 const ACTIVITIES = new Set([
@@ -26,6 +27,7 @@ const TITLE_MAX = 120;
 const METHOD_MAX = 160;
 const DETAILS_MAX = 2000;
 const ATTACHMENT_NAME_MAX = 200;
+const ATTACHMENTS_MAX = 5;
 
 function isValidCalendarDate(value) {
   if (!DATE_RE.test(value)) return false;
@@ -128,19 +130,33 @@ router.post('/', requireAuth, requireRole('user'), (req, res) => {
     return res.status(400).json({ error: `Chi tiết tối đa ${DETAILS_MAX} ký tự` });
   }
 
-  let attachmentUrl = null;
-  let attachmentName = null;
-  if (body.attachment && typeof body.attachment === 'object') {
-    const url = body.attachment.url;
-    const name = typeof body.attachment.name === 'string' ? body.attachment.name.trim() : '';
+  // Đính kèm: nhận `attachments` [{url, name}] (mới) hoặc `attachment` {url, name} (cũ)
+  let attachments = [];
+  if (body.attachments !== undefined) {
+    if (!Array.isArray(body.attachments)) {
+      return res.status(400).json({ error: 'Đính kèm không hợp lệ' });
+    }
+    attachments = body.attachments;
+  } else if (body.attachment && typeof body.attachment === 'object') {
+    attachments = [body.attachment];
+  }
+  if (attachments.length > ATTACHMENTS_MAX) {
+    return res.status(400).json({ error: `Tối đa ${ATTACHMENTS_MAX} tệp đính kèm mỗi mục nhật ký` });
+  }
+  const cleanAttachments = [];
+  for (const item of attachments) {
+    if (!item || typeof item !== 'object') {
+      return res.status(400).json({ error: 'Đính kèm không hợp lệ' });
+    }
+    const url = item.url;
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
     if (typeof url !== 'string' || !UPLOAD_URL_RE.test(url) || url.includes('..')) {
       return res.status(400).json({ error: 'Đính kèm không hợp lệ' });
     }
     if (!name || name.length > ATTACHMENT_NAME_MAX) {
       return res.status(400).json({ error: 'Tên đính kèm không hợp lệ' });
     }
-    attachmentUrl = url;
-    attachmentName = name;
+    cleanAttachments.push({ url, name });
   }
 
   const entry = insertProcessEntry(req.user.id, {
@@ -149,9 +165,10 @@ router.post('/', requireAuth, requireRole('user'), (req, res) => {
     title,
     method,
     details,
-    attachmentUrl,
-    attachmentName,
+    attachments: cleanAttachments,
   });
+  const entryAttachments = parseEntryAttachments(entry.attachment_url, entry.attachment_name);
+  const first = entryAttachments[0] || null;
   broadcastProcessUpdate(req, req.user.id, 'created', entry.id);
   res.status(201).json({
     success: true,
@@ -163,8 +180,9 @@ router.post('/', requireAuth, requireRole('user'), (req, res) => {
       title: entry.title,
       method: entry.method,
       details: entry.details,
-      attachmentUrl: entry.attachment_url,
-      attachmentName: entry.attachment_name,
+      attachments: entryAttachments,
+      attachmentUrl: first ? first.url : null,
+      attachmentName: first ? first.name : null,
       createdAt: entry.created_at,
     },
   });

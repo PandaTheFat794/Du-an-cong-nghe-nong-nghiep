@@ -14,11 +14,35 @@ function homeFor(role) {
   return role === 'admin' ? '/admin' : role === 'partner' ? '/partner' : '/chat';
 }
 
+// CSRF token của session (cache khi thành công; lỗi thì lần sau thử lại)
+let csrfToken = null;
+let csrfTokenPromise = null;
+function getCsrfToken() {
+  if (csrfToken) return Promise.resolve(csrfToken);
+  if (!csrfTokenPromise) {
+    csrfTokenPromise = fetch(API_BASE + '/csrf')
+      .then((r) => r.json())
+      .then((d) => {
+        csrfToken = d && d.success ? d.csrfToken : null;
+        csrfTokenPromise = null;
+        return csrfToken;
+      })
+      .catch(() => {
+        csrfTokenPromise = null;
+        return null;
+      });
+  }
+  return csrfTokenPromise;
+}
+
 async function api(path, opts = {}) {
-  const resp = await fetch(API_BASE + path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
+  const method = (opts.method || 'GET').toUpperCase();
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  if (method !== 'GET' && method !== 'HEAD') {
+    const token = await getCsrfToken();
+    if (token) headers['X-CSRF-Token'] = token;
+  }
+  const resp = await fetch(API_BASE + path, { ...opts, method, headers });
   let data = null;
   try { data = await resp.json(); } catch { /* response không phải JSON */ }
   return { status: resp.status, data };
@@ -34,7 +58,10 @@ async function logout() {
 async function uploadFile(file) {
   const fd = new FormData();
   fd.append('file', file);
-  const resp = await fetch(API_BASE + '/upload', { method: 'POST', body: fd });
+  const headers = {};
+  const token = await getCsrfToken();
+  if (token) headers['X-CSRF-Token'] = token;
+  const resp = await fetch(API_BASE + '/upload', { method: 'POST', headers, body: fd });
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(data.error || 'Upload thất bại');
   return data;
@@ -62,7 +89,11 @@ function formatTime(value) {
 function messageEl(msg, mine, cssBase = 'message') {
   const div = document.createElement('div');
   div.className = `${cssBase} ${mine ? 'user' : 'admin'}`;
-  if (msg.senderRole) div.classList.add(`role-${msg.senderRole}`);
+  if (msg.senderRole) {
+    div.classList.add(`role-${msg.senderRole}`);
+    div.dataset.senderRole = msg.senderRole;
+  }
+  if (msg.id != null) div.dataset.msgId = msg.id;
 
   if (!mine && msg.senderName) {
     const name = document.createElement('div');
@@ -73,6 +104,7 @@ function messageEl(msg, mine, cssBase = 'message') {
 
   if (msg.content) {
     const text = document.createElement('div');
+    text.className = `${cssBase}-text`;
     text.textContent = msg.content;
     div.appendChild(text);
   }
@@ -85,7 +117,16 @@ function messageEl(msg, mine, cssBase = 'message') {
       img.src = msg.attachmentUrl;
       img.alt = msg.attachmentName || 'hình ảnh';
       img.title = 'Bấm để xem ảnh to';
+      img.tabIndex = 0;
+      img.setAttribute('role', 'button');
+      img.setAttribute('aria-label', 'Xem ảnh phóng to');
       img.addEventListener('click', () => openLightbox(msg.attachmentUrl, msg.attachmentName));
+      img.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openLightbox(msg.attachmentUrl, msg.attachmentName);
+        }
+      });
       div.appendChild(img);
     } else if (AUDIO_EXT_RE.test(name)) {
       const audio = document.createElement('audio');
@@ -110,7 +151,25 @@ function messageEl(msg, mine, cssBase = 'message') {
   time.textContent = formatTime(msg.createdAt);
   div.appendChild(time);
 
+  // Nhãn "Đã xem" cho tin của mình (bên kia đã đọc tới id ≤ watermark)
+  const status = document.createElement('div');
+  status.className = `${cssBase}-status`;
+  div.appendChild(status);
+
   return div;
+}
+
+/**
+ * Cập nhật nhãn "Đã xem": tin của myRole có id ≤ seenUpTo → hiện chữ "Đã xem".
+ * Tin chưa được đọc hoặc của người khác → để trống (CSS :empty ẩn đi).
+ */
+function applySeenStatus(area, seenUpTo, myRole) {
+  if (!seenUpTo || !area) return;
+  for (const el of area.querySelectorAll('.message[data-msg-id]')) {
+    if (el.dataset.senderRole !== myRole) continue;
+    const status = el.querySelector('.message-status');
+    if (status) status.textContent = Number(el.dataset.msgId) <= seenUpTo ? 'Đã xem' : '';
+  }
 }
 
 // Gắn nút logout cho mọi trang
@@ -125,7 +184,7 @@ function wireLogout(buttonId) {
  * - area: khung chứa tin, button: nút tải thêm (hidden khi hết tin)
  * - render(msg): trả về element của một tin
  */
-function createHistoryPager(area, button, render) {
+function createHistoryPager(area, button, render, afterRender) {
   const PAGE_SIZE = 50;
   let convId = null;
   let oldestId = null;
@@ -150,6 +209,7 @@ function createHistoryPager(area, button, render) {
     hasMore = !!data.has_more;
     if (data.messages.length) oldestId = data.messages[0].id;
     syncButton();
+    if (afterRender) afterRender();
   }
 
   async function loadMore() {
@@ -185,6 +245,146 @@ function createHistoryPager(area, button, render) {
       syncButton();
     },
     loadMore,
+    // Nhảy tới một tin cụ thể (kết quả tìm kiếm): tải trang quanh tin đó,
+    // highlight + cuộn tới, pager "Tải tin cũ hơn" tiếp tục hoạt động bình thường.
+    async jumpAround(id) {
+      if (!convId) return null;
+      const requestedConv = convId;
+      const { data } = await api(`/conversations/${requestedConv}/messages?around=${id}&limit=${PAGE_SIZE}`);
+      if (requestedConv !== convId || !data || !data.success) return null;
+      area.innerHTML = '';
+      applyPage(data, false);
+      const target = area.querySelector(`.message[data-msg-id="${id}"]`);
+      if (target) {
+        target.classList.add('message-flash');
+        setTimeout(() => target.classList.remove('message-flash'), 2600);
+        target.scrollIntoView({ block: 'center' });
+      }
+      return data;
+    },
+  };
+}
+
+// ===== Tìm kiếm lịch sử chat =====
+// Panel tìm trong cuộc trò chuyện đang mở: gõ ≥2 ký tự → gọi API search,
+// bấm kết quả → onJump(id) (trang tự lo nhảy + highlight). Esc/× để đóng.
+// getConvId() trả id thread đang mở (null/falsy khi chưa mở thread nào).
+function wireChatSearch({ toggleBtn, panel, input, results, closeBtn, getConvId, onJump }) {
+  let debounceTimer = null;
+
+  function closePanel() {
+    panel.hidden = true;
+    results.hidden = true;
+    toggleBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function openPanel() {
+    panel.hidden = false;
+    toggleBtn.setAttribute('aria-expanded', 'true');
+    input.focus();
+  }
+
+  function renderResults(convId, q, items) {
+    results.innerHTML = '';
+    results.hidden = false;
+    if (!items.length) {
+      const li = document.createElement('li');
+      li.className = 'chat-search-empty';
+      li.textContent = 'Không tìm thấy tin nhắn nào';
+      results.appendChild(li);
+      return;
+    }
+    for (const r of items) {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chat-search-item';
+      const head = document.createElement('span');
+      head.className = 'chat-search-head';
+      const sender = document.createElement('span');
+      sender.textContent = r.senderRole === 'bot' ? 'Trợ lý AI' : (r.senderName || '');
+      const time = document.createElement('span');
+      time.textContent = formatTime(r.createdAt);
+      head.append(sender, time);
+      const snippet = document.createElement('span');
+      snippet.className = 'chat-search-text';
+      snippet.textContent = r.content || (r.attachmentName ? `[Đính kèm: ${r.attachmentName}]` : '[Tin nhắn]');
+      btn.append(head, snippet);
+      btn.addEventListener('click', () => {
+        closePanel();
+        onJump(r.id);
+      });
+      li.appendChild(btn);
+      results.appendChild(li);
+    }
+  }
+
+  async function runSearch(q) {
+    const convId = getConvId();
+    if (!convId) {
+      results.innerHTML = '';
+      const li = document.createElement('li');
+      li.className = 'chat-search-empty';
+      li.textContent = 'Hãy mở một cuộc trò chuyện trước';
+      results.appendChild(li);
+      results.hidden = false;
+      return;
+    }
+    results.innerHTML = '';
+    const loading = document.createElement('li');
+    loading.className = 'chat-search-empty';
+    loading.textContent = 'Đang tìm...';
+    results.appendChild(loading);
+    results.hidden = false;
+    const { data } = await api(`/conversations/${convId}/search?q=${encodeURIComponent(q)}`);
+    // Bỏ qua kết quả nếu người dùng đã đóng panel / đổi thread / sửa từ khóa
+    if (panel.hidden || getConvId() !== convId || input.value.trim() !== q) return;
+    if (!data || !data.success) {
+      results.innerHTML = '';
+      const li = document.createElement('li');
+      li.className = 'chat-search-empty';
+      li.textContent = (data && data.error) || 'Không tìm kiếm được';
+      results.appendChild(li);
+      return;
+    }
+    renderResults(convId, q, data.results);
+  }
+
+  toggleBtn.addEventListener('click', () => {
+    if (panel.hidden) {
+      openPanel();
+      if (input.value.trim().length >= 2) runSearch(input.value.trim());
+    } else {
+      closePanel();
+    }
+  });
+
+  input.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    const q = input.value.trim();
+    if (q.length < 2) {
+      results.hidden = true;
+      return;
+    }
+    debounceTimer = setTimeout(() => runSearch(q), 250);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closePanel();
+      toggleBtn.focus();
+    }
+  });
+  if (closeBtn) closeBtn.addEventListener('click', closePanel);
+
+  return {
+    close: closePanel,
+    // Đóng + xóa từ khóa khi chuyển thread (do từng trang gọi lúc mở thread mới)
+    reset() {
+      closePanel();
+      input.value = '';
+      results.hidden = true;
+    },
   };
 }
 
@@ -209,11 +409,16 @@ function toast(message, type = 'info', duration = 3500) {
 
 // ===== Lightbox xem ảnh to =====
 let lightboxEl = null;
+let lightboxPrevFocus = null;
 
 function closeLightbox() {
   if (!lightboxEl || lightboxEl.hidden) return;
   lightboxEl.classList.remove('open');
   document.body.classList.remove('lightbox-open');
+  if (lightboxPrevFocus && typeof lightboxPrevFocus.focus === 'function' && document.contains(lightboxPrevFocus)) {
+    lightboxPrevFocus.focus();
+  }
+  lightboxPrevFocus = null;
   setTimeout(() => {
     // Đã mở ảnh khác ngay sau khi đóng → không ẩn lightbox mới
     if (!lightboxEl.classList.contains('open')) {
@@ -229,6 +434,7 @@ function openLightbox(src, alt) {
     lightboxEl.className = 'lightbox';
     lightboxEl.hidden = true;
     lightboxEl.setAttribute('role', 'dialog');
+    lightboxEl.setAttribute('aria-modal', 'true');
     lightboxEl.setAttribute('aria-label', 'Xem ảnh phóng to');
 
     const closeBtn = document.createElement('button');
@@ -253,8 +459,10 @@ function openLightbox(src, alt) {
   const img = lightboxEl.querySelector('img');
   img.src = src;
   img.alt = alt || '';
+  lightboxPrevFocus = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
   lightboxEl.hidden = false;
   document.body.classList.add('lightbox-open');
+  lightboxEl.querySelector('.lightbox-close').focus();
   requestAnimationFrame(() => lightboxEl.classList.add('open'));
 }
 
@@ -386,6 +594,36 @@ function createTypingView(area, scrollBottom) {
   };
 }
 
+/**
+ * Bubble bot đang trả lời: nội dung stream tới đâu hiện tới đó, kèm con trỏ nhấp nháy.
+ * Khi tin thật (event 'message' cùng clientId) tới thì gọi el.remove() rồi render tin thật.
+ */
+function botStreamRow(name) {
+  const row = document.createElement('div');
+  row.className = 'message admin role-bot bot-streaming';
+  const sender = document.createElement('div');
+  sender.className = 'message-sender';
+  sender.textContent = name || 'Trợ lý AI';
+  const text = document.createElement('div');
+  text.className = 'bot-stream-text';
+  const caret = document.createElement('span');
+  caret.className = 'bot-caret';
+  caret.setAttribute('aria-hidden', 'true');
+  row.appendChild(sender);
+  row.appendChild(text);
+  row.appendChild(caret);
+  return {
+    el: row,
+    append(delta) {
+      text.textContent += delta;
+    },
+    reset() {
+      // API chính lỗi giữa chừng → xóa chữ stream dở trước khi fallback gõ tiếp
+      text.textContent = '';
+    },
+  };
+}
+
 /** Dot trạng thái kết nối + toast khi rớt/mở lại socket. */
 function wireConnectionIndicator(socket, dotEl) {
   socket.on('connect', () => {
@@ -443,6 +681,40 @@ function voiceExtFor(mime) {
  * - convId được chụp lúc bắt đầu ghi; người gọi tự kiểm tra đã chuyển thread chưa
  * Trả về { cancel, isRecording } để hủy khi đổi cuộc trò chuyện.
  */
+// ===== Tablist theo WAI-ARIA: mũi tên trái/phải (hoặc lên/xuống) + Home/End =====
+function wireTablist(tablistId, activate) {
+  const tablist = document.getElementById(tablistId);
+  if (!tablist) return;
+  tablist.addEventListener('keydown', (e) => {
+    const tabs = [...tablist.querySelectorAll('[role="tab"]')].filter((t) => !t.hidden && !t.disabled);
+    if (!tabs.length) return;
+    const idx = tabs.indexOf(document.activeElement);
+    if (idx === -1) return;
+    let next = null;
+    switch (e.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        next = tabs[(idx + 1) % tabs.length];
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        next = tabs[(idx - 1 + tabs.length) % tabs.length];
+        break;
+      case 'Home':
+        next = tabs[0];
+        break;
+      case 'End':
+        next = tabs[tabs.length - 1];
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    next.focus();
+    activate(next);
+  });
+}
+
 function wireVoiceRecorder({ buttonId, chipId, canStart, getConvId, onRecorded, maxSeconds = 60 }) {
   const btn = document.getElementById(buttonId);
   const chip = chipId ? document.getElementById(chipId) : null;

@@ -18,12 +18,17 @@ document.addEventListener('DOMContentLoaded', () => {
   function switchTab(showRegister) {
     tabLogin.classList.toggle('active', !showRegister);
     tabRegister.classList.toggle('active', showRegister);
+    tabLogin.setAttribute('aria-selected', String(!showRegister));
+    tabRegister.setAttribute('aria-selected', String(showRegister));
+    tabLogin.tabIndex = showRegister ? -1 : 0;
+    tabRegister.tabIndex = showRegister ? 0 : -1;
     loginForm.hidden = showRegister;
     registerForm.hidden = !showRegister;
     errorBox.hidden = true;
   }
   tabLogin.addEventListener('click', () => switchTab(false));
   tabRegister.addEventListener('click', () => switchTab(true));
+  wireTablist('authTabs', (btn) => switchTab(btn === tabRegister));
 
   // Vào nhanh 1 trong 3 tài khoản seed (demo) — vẫn đi qua /api/login như form thường
   const quickButtons = [...document.querySelectorAll('.quick-account')];

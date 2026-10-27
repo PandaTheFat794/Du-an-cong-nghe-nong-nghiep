@@ -7,7 +7,9 @@ const session = require('express-session');
 const { Server } = require('socket.io');
 
 const { store, getSessionUser } = require('./session-store');
-const { getConversation, insertMessage, countUnread, countPartnerUnread, markAsRead, canAccessConversation } = require('./db');
+const { getConversation, insertMessage, countUnread, countPartnerUnread, markAsRead, canAccessConversation, getBotUser, getMessagesPage } = require('./db');
+const { generateReply, isOfficeHoursNow, OFFHOURS_REPLY } = require('./bot');
+const { requireCsrf } = require('./auth');
 const authRoutes = require('./routes/auth');
 const chatRoutes = require('./routes/chat');
 const adminRoutes = require('./routes/admin');
@@ -37,6 +39,16 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'same-origin');
   next();
+});
+
+// === CSRF: mọi request đổi dữ liệu qua /api phải kèm X-CSRF-Token khớp session.
+// Miễn login/register (chưa có token trước khi đăng nhập); GET/HEAD không đổi dữ liệu.
+// Request chưa đăng nhập để requireAuth trả 401 (không đổi thành 403).
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+  if (req.path === '/login' || req.path === '/register') return next();
+  if (!req.session || !req.session.user) return next();
+  requireCsrf(req, res, next);
 });
 
 // === Socket.io (handshake mang ?sessionId= để định danh) ===
@@ -73,6 +85,15 @@ app.get('/partner', pageGuard('partner'), (req, res) => res.sendFile(path.join(_
 // === Static files ===
 app.use(express.static(path.join(__dirname, 'public')));
 
+// === Job dọn rác uploads (chạy nền; interval 0 giờ = tắt, dùng cho e2e/ui-check) ===
+const db = require('./db');
+const { startUploadsCleanup } = require('./uploads-cleanup');
+startUploadsCleanup(db, path.join(__dirname, 'public', 'uploads'), {
+  intervalHours: Number(process.env.UPLOAD_CLEANUP_INTERVAL_HOURS || 24),
+  minAgeHours: Number(process.env.UPLOAD_CLEANUP_MIN_AGE_HOURS || 24),
+  log: console.log,
+});
+
 // ==== Socket.io events ====
 
 // Chống spam: tối đa 8 tin nhắn / 10 giây / user
@@ -97,12 +118,112 @@ setInterval(() => {
   }
 }, RATE_WINDOW_MS).unref();
 
+// ===== Bot chuyên gia nông nghiệp =====
+// Trả lời tự động trong thread user_admin khi khách nhắn (nếu bot_enabled).
+// Stream từng cụm chữ qua 'bot-stream', kết thúc bằng 1 tin 'message' thật của
+// user ảo ai-bot (senderRole='bot'). Mỗi conversation chỉ 1 câu trả lời tại 1 thời điểm.
+const botBusy = new Set();
+const BOT_THINK_MS = 400;
+
+function triggerBotReply(conversation) {
+  if (botBusy.has(conversation.id)) return;
+  const bot = getBotUser();
+  if (!bot) return;
+  botBusy.add(conversation.id);
+  const room = `conv_${conversation.id}`;
+  const clientId = 'bot-' + Math.random().toString(36).slice(2, 10);
+
+  (async () => {
+    try {
+      io.to(room).emit('typing', {
+        convId: conversation.id,
+        userId: bot.id,
+        name: bot.display_name,
+        isTyping: true,
+      });
+      // Khoảng "suy nghĩ" ngắn để typing indicator + bubble streaming hiển thị tự nhiên
+      await new Promise((r) => setTimeout(r, BOT_THINK_MS));
+
+      const history = getMessagesPage(conversation.id, null, 20).messages;
+      let text;
+      let via;
+      let used = 'primary';
+      let unsure = false;
+      if (isOfficeHoursNow()) {
+        const reply = await generateReply(
+          history,
+          (delta) => {
+            io.to(room).emit('bot-stream', { convId: conversation.id, delta, clientId });
+          },
+          () => {
+            // API chính lỗi giữa chừng → xóa phần stream dở để không lẫn chữ vào câu trả lời fallback
+            io.to(room).emit('bot-stream', { convId: conversation.id, reset: true, clientId });
+          },
+        );
+        text = reply.text;
+        via = reply.via;
+        used = reply.used || used;
+        unsure = reply.unsure === true;
+      } else {
+        // Ngoài giờ hành chính (OFFICE_HOURS): không gọi LLM/KB, trả lời cố định nhắc
+        // khách để lại lời nhắn — admin xử lý khi vào giờ.
+        text = OFFHOURS_REPLY;
+        via = 'offhours';
+        io.to(room).emit('bot-stream', { convId: conversation.id, delta: text, clientId });
+      }
+      // Conversation có thể bị xóa trong lúc LLM đang trả lời (user tự xóa tài khoản)
+      if (!getConversation(conversation.id)) return;
+      const row = insertMessage(conversation.id, bot.id, text, null, null);
+      const payload = {
+        id: row.id,
+        convId: conversation.id,
+        senderId: bot.id,
+        senderName: bot.display_name,
+        senderRole: 'bot',
+        content: row.content,
+        attachmentUrl: null,
+        attachmentName: null,
+        createdAt: row.created_at,
+        clientId,
+      };
+      io.to(room).emit('message', payload);
+      if (via === 'llm') console.log(`🤖 Bot LLM trả lời conv ${conversation.id} (${row.content.length} ký tự${used !== 'primary' ? `, API ${used}` : ''})`);
+      if (via === 'offhours') console.log(`🤖 Bot ngoài giờ trả lời conv ${conversation.id}`);
+      if (unsure) {
+        // Bot về rule-based fallback (không chắc chắn) → báo admin chuyển tiếp
+        io.to('admins').emit('bot-unsure', {
+          convId: conversation.id,
+          userId: conversation.user_id,
+          userName: conversation.user_name,
+          preview: String(text).slice(0, 80),
+        });
+        console.log(`🤖 Bot không chắc chắn câu hỏi của "${conversation.user_name}" (conv ${conversation.id}) — đã báo admin`);
+      }
+    } catch (err) {
+      console.warn('🤖 Bot lỗi:', err.message);
+    } finally {
+      io.to(room).emit('typing', {
+        convId: conversation.id,
+        userId: bot.id,
+        name: bot.display_name,
+        isTyping: false,
+      });
+      botBusy.delete(conversation.id);
+    }
+  })();
+}
+
 // Hợp đồng sự kiện:
 //   client → server: 'join' {convId}, 'message' {convId, content, attachment?, clientId?},
 //                     'read' {convId}, 'typing' {convId, isTyping}
 //   server → client: 'joined', 'message', 'unread-badge', 'badge-cleared',
 //                     'user-message' (room admins), 'partner-message'/'partner-badge'/
 //                     'partner-badge-cleared' (room admins), 'typing',
+//                     'bot-stream' {convId, delta, clientId} (bot đang trả lời),
+//                     'bot-unsure' {convId, userId, userName, preview} (room admins:
+//                     bot về rule-based fallback — không chắc chắn, nhờ admin chuyển tiếp),
+//                     'read-by' {convId, userId, userSide, seenUpTo} (bên kia đã đọc →
+//                     client hiện "Đã xem" cho tin của mình có id ≤ seenUpTo),
 //                     'process-updated' {userId, userName, convId, action, entryId}, 'error'
 io.on('connection', (socket) => {
   const user = socket.user;
@@ -216,21 +337,38 @@ io.on('connection', (socket) => {
         count: countPartnerUnread(conversation.id),
       });
     }
+
+    // Bot chuyên gia: khách nhắn trong thread user_admin → bot trả lời tự động
+    // (nếu admin bật bot cho khách này). Không trả lời trong thread partner.
+    if (conversation.kind === 'user_admin' && user.role === 'user' && conversation.bot_enabled === 1) {
+      triggerBotReply(conversation);
+    }
   });
 
-  // Admin mở một thread → đánh dấu đã đọc, xoá badge tương ứng
+  // Mở một thread → đánh dấu đã đọc bên tương ứng + bắn 'read-by' để bên kia
+  // thấy nhãn "Đã xem". Admin đọc thêm thì xoá badge tương ứng.
   socket.on('read', ({ convId }) => {
-    if (!user || user.role !== 'admin') return;
+    if (!user) return;
     const conversation = getConversation(Number(convId));
     if (!conversation || !canAccessConversation(user, conversation)) return;
-    markAsRead(conversation.id);
-    if (conversation.kind === 'partner_admin') {
-      io.to('admins').emit('partner-badge-cleared', {
-        convId: conversation.id,
-        userId: conversation.user_id,
-      });
-    } else {
-      io.to('admins').emit('badge-cleared', { convId: conversation.id });
+    const userSide = user.role === 'user'
+      || (user.role === 'partner' && conversation.kind === 'partner_admin');
+    const seenUpTo = markAsRead(conversation.id, userSide);
+    io.to(`conv_${conversation.id}`).emit('read-by', {
+      convId: conversation.id,
+      userId: user.id,
+      userSide,
+      seenUpTo,
+    });
+    if (user.role === 'admin') {
+      if (conversation.kind === 'partner_admin') {
+        io.to('admins').emit('partner-badge-cleared', {
+          convId: conversation.id,
+          userId: conversation.user_id,
+        });
+      } else {
+        io.to('admins').emit('badge-cleared', { convId: conversation.id });
+      }
     }
   });
 

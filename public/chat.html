@@ -8,7 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/chat.css">
+  <link rel="stylesheet" href="/css/process.css">
 </head>
 <body data-account-controls="headerControls">
   <div id="root">
@@ -17,11 +19,24 @@
         <h2><span class="status-dot" id="connDot"></span><span id="chatTitle">Chuyên gia tư vấn</span></h2>
         <div class="chat-controls" id="headerControls">
           <div class="view-tabs header-tabs" id="threadTabs" role="tablist" aria-label="Cuộc trò chuyện riêng" hidden>
-            <button class="view-tab active" data-thread="admin" role="tab" aria-selected="true" type="button">Chuyên gia</button>
-            <button class="view-tab" data-thread="partner" role="tab" aria-selected="false" type="button" hidden></button>
+            <button class="view-tab active" data-thread="admin" role="tab" aria-selected="true" tabindex="0" type="button">Chuyên gia</button>
+            <button class="view-tab" data-thread="partner" role="tab" aria-selected="false" tabindex="-1" type="button" hidden></button>
           </div>
           <button class="chat-btn" id="processBtn" type="button">Nhật ký</button>
+          <button class="chat-btn search-toggle-btn" id="searchToggleBtn" type="button" title="Tìm trong lịch sử chat" aria-label="Tìm kiếm tin nhắn" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          </button>
           <button class="chat-btn" id="logoutBtn" type="button">Đăng xuất</button>
+        </div>
+      </div>
+      <div class="chat-search-anchor">
+        <div class="chat-search" id="chatSearch" hidden>
+          <div class="chat-search-bar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" id="chatSearchInput" placeholder="Tìm trong cuộc trò chuyện..." autocomplete="off" aria-label="Từ khóa tìm kiếm tin nhắn">
+            <button class="chat-search-close" id="chatSearchClose" type="button" aria-label="Đóng tìm kiếm">×</button>
+          </div>
+          <ul class="chat-search-results" id="chatSearchResults" hidden></ul>
         </div>
       </div>
       <button class="load-more" id="loadMoreBtn" type="button" hidden>Tải tin cũ hơn</button>
@@ -36,7 +51,7 @@
         </button>
         <input type="file" id="attachInput" hidden accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx">
         <input class="input-field" id="msgInput" type="text" placeholder="Nhập tin nhắn..." autocomplete="off">
-        <button class="input-btn" id="sendBtn">Gửi
+        <button class="input-btn" id="sendBtn" aria-label="Gửi" title="Gửi">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
         </button>
       </div>

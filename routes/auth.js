@@ -38,6 +38,15 @@ const registerLimiter = createRateLimiter({
   message: 'Bạn đã tạo quá nhiều tài khoản, vui lòng thử lại sau.',
 });
 
+/**
+ * GET /api/csrf
+ * Trả CSRF token của session hiện tại để client gắn vào header
+ * X-CSRF-Token cho các request đổi dữ liệu (POST/PUT/PATCH/DELETE).
+ */
+router.get('/csrf', auth.requireAuth, (req, res) => {
+  res.json({ success: true, csrfToken: auth.getOrCreateCsrfToken(req) });
+});
+
 // POST /api/register: khách hàng tự đăng ký tài khoản (role='user')
 router.post('/register', registerLimiter, (req, res) => {
   const { username, password, display_name } = req.body || {};

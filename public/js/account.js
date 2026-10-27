@@ -22,8 +22,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   panel.innerHTML = `
     <form id="pwForm">
       <label class="panel-title">Đổi mật khẩu</label>
-      <input class="form-field" type="password" id="pwCurrent" placeholder="Mật khẩu hiện tại" autocomplete="current-password" required>
-      <input class="form-field" type="password" id="pwNew" placeholder="Mật khẩu mới (tối thiểu 6 ký tự)" autocomplete="new-password" minlength="6" required>
+      <input class="form-field" type="password" id="pwCurrent" placeholder="Mật khẩu hiện tại" aria-label="Mật khẩu hiện tại" autocomplete="current-password" required>
+      <input class="form-field" type="password" id="pwNew" placeholder="Mật khẩu mới (tối thiểu 6 ký tự)" aria-label="Mật khẩu mới" autocomplete="new-password" minlength="6" required>
       <button class="btn-primary" type="submit">Đổi mật khẩu</button>
       <div class="panel-msg" id="pwMsg"></div>
     </form>

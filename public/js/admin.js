@@ -17,6 +17,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const chatTitle = document.getElementById('chatTitle');
   const partnerSelect = document.getElementById('partnerSelect');
   const connectPartnerBtn = document.getElementById('connectPartnerBtn');
+  const disconnectPartnerBtn = document.getElementById('disconnectPartnerBtn');
+  const partnerChip = document.getElementById('partnerChip');
+  const partnerChipName = document.getElementById('partnerChipName');
+  const botToggleWrap = document.getElementById('botToggleWrap');
+  const botToggleInput = document.getElementById('botToggleInput');
   const processBtn = document.getElementById('processBtn');
   const statsBtn = document.getElementById('statsBtn');
   const threadTabs = document.getElementById('threadTabs');
@@ -29,11 +34,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (selectedUser) processDrawer.open(selectedUser.id, selectedUser.display_name);
   });
 
+  let seenWatermark = 0; // mốc "bên kia đã đọc" của thread đang mở (nhãn Đã xem)
   const pager = createHistoryPager(
     messagesArea,
     document.getElementById('loadMoreBtn'),
-    (msg) => messageEl(msg, msg.senderRole === 'admin')
+    (msg) => messageEl(msg, msg.senderRole === 'admin'),
+    () => applySeenStatus(messagesArea, seenWatermark, myUser.role)
   );
+
+  // Tìm trong lịch sử của thread đang mở; click kết quả → nhảy tới tin đó
+  const chatSearch = wireChatSearch({
+    toggleBtn: document.getElementById('searchToggleBtn'),
+    panel: document.getElementById('chatSearch'),
+    input: document.getElementById('chatSearchInput'),
+    results: document.getElementById('chatSearchResults'),
+    closeBtn: document.getElementById('chatSearchClose'),
+    getConvId: () => activeConvId,
+    onJump: (id) => pager.jumpAround(id),
+  });
 
   let selectedUser = null; // row mới nhất từ /admin/users
   let activeThread = 'user'; // 'user' | 'partner'
@@ -191,12 +209,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     activeConvId = null;
     typingView.hide();
     pendingSends.clear();
+    botStreams.clear();
     voice?.cancel();
     pager.reset();
+    chatSearch.reset();
     chatTitle.textContent = 'Chọn một khách hàng để tư vấn';
     [msgInput, sendBtn, attachBtn, voiceBtn].forEach((el) => { el.disabled = true; });
     partnerSelect.hidden = true;
     connectPartnerBtn.hidden = true;
+    disconnectPartnerBtn.hidden = true;
+    partnerChip.hidden = true;
+    botToggleWrap.hidden = true;
     processBtn.hidden = true;
     threadTabs.hidden = true;
     partnerThreadTab.hidden = true;
@@ -237,6 +260,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const active = btn.dataset.thread === activeThread;
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      btn.tabIndex = active ? 0 : -1;
     }
   }
 
@@ -259,12 +283,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       : `Nhắn cho ${selectedUser.display_name}...`;
     typingView.hide();
     pendingSends.clear();
+    botStreams.clear();
     voice?.cancel();
+    chatSearch.reset();
 
     socket.emit('join', { convId });
     const data = await pager.open(convId);
     if (activeConvId !== convId) return; // đã chuyển luồng khác trong lúc chờ
     scrollBottom();
+    if (data && data.conversation) {
+      seenWatermark = data.conversation.user_last_read_id || 0;
+      applySeenStatus(messagesArea, seenWatermark, myUser.role);
+    }
     if (data && data.conversation.kind === 'user_admin') {
       selectedUser.partner_id = data.conversation.partner_id;
       selectedUser.partner_name = data.conversation.partner_name;
@@ -289,6 +319,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     partnerSelect.hidden = false;
     connectPartnerBtn.hidden = false;
     processBtn.hidden = false;
+    botToggleWrap.hidden = false;
+    botToggleInput.checked = selectedUser.bot_enabled !== false;
     renderPartnerControl(selectedUser.partner_id, selectedUser.partner_name);
     updateThreadTabs();
     await openThread(activeThread);
@@ -297,6 +329,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   for (const btn of tabButtons) {
     btn.addEventListener('click', () => openThread(btn.dataset.thread));
   }
+  wireTablist('threadTabs', (btn) => openThread(btn.dataset.thread));
 
   // ===== Gán Partner =====
   async function loadPartners() {
@@ -305,21 +338,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function renderPartnerControl(assignedId, assignedName) {
+    const connected = !!assignedId;
+    partnerChip.hidden = !connected;
+    disconnectPartnerBtn.hidden = !connected;
+    partnerChipName.textContent = assignedName ? `Đã kết nối: ${assignedName}` : 'Đã kết nối';
+    partnerSelect.hidden = connected;
+    connectPartnerBtn.hidden = connected;
     partnerSelect.innerHTML = '';
-    if (assignedId) {
-      const opt = document.createElement('option');
-      opt.value = assignedId;
-      opt.textContent = `Đang gán: ${assignedName || ''}`;
-      partnerSelect.appendChild(opt);
+    if (!connected) {
+      for (const p of partners) {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.display_name;
+        partnerSelect.appendChild(opt);
+      }
+      connectPartnerBtn.disabled = !partnerSelect.options.length;
     }
-    for (const p of partners) {
-      if (p.id === assignedId) continue;
-      const opt = document.createElement('option');
-      opt.value = p.id;
-      opt.textContent = p.display_name;
-      partnerSelect.appendChild(opt);
-    }
-    connectPartnerBtn.disabled = !partners.length;
   }
 
   connectPartnerBtn.addEventListener('click', async () => {
@@ -344,6 +378,46 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  disconnectPartnerBtn.addEventListener('click', async () => {
+    if (!selectedUser || !selectedUser.partner_id) return;
+    if (!confirm(`Bạn có muốn hủy liên kết với partner "${selectedUser.partner_name || ''}" của khách hàng này không?`)) return;
+    const { data } = await api(`/admin/conversations/${selectedUser.conversation_id}/disconnect`, {
+      method: 'POST',
+    });
+    if (data && data.success) {
+      selectedUser.partner_id = null;
+      selectedUser.partner_name = '';
+      selectedUser.partner_conversation_id = null;
+      if (activeThread === 'partner') activeThread = 'user';
+      toast('Đã hủy liên kết Partner.', 'success');
+      await loadUsers();
+      renderPartnerControl(null, '');
+      updateThreadTabs();
+      await openThread(activeThread);
+    } else {
+      toast((data && data.error) || 'Không hủy được liên kết', 'error');
+    }
+  });
+
+  // ===== Bật/tắt Bot chuyên gia cho khách đang chọn =====
+  botToggleInput.addEventListener('change', async () => {
+    if (!selectedUser) return;
+    const enabled = botToggleInput.checked;
+    const { data } = await api(`/admin/conversations/${selectedUser.conversation_id}/bot`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    });
+    if (data && data.success) {
+      selectedUser.bot_enabled = enabled;
+      const u = latestUsers.find((x) => x.id === selectedUser.id);
+      if (u) u.bot_enabled = enabled;
+      toast(enabled ? 'Bot AI đã bật cho khách này.' : 'Bot AI đã tắt cho khách này.', 'success');
+    } else {
+      botToggleInput.checked = !enabled; // hoàn tác nếu server từ chối
+      toast((data && data.error) || 'Không đổi được trạng thái bot', 'error');
+    }
+  });
+
   // ===== Thống kê hệ thống =====
   const statsOverlay = document.getElementById('statsOverlay');
   const statsCloseBtn = document.getElementById('statsCloseBtn');
@@ -359,6 +433,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function closeStats() {
     statsOverlay.hidden = true;
+    statsBtn.focus();
   }
 
   function renderBarChart(container, days) {
@@ -455,9 +530,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  statsBtn.addEventListener('click', async () => {
-    statsOverlay.hidden = false;
-    const { data } = await api('/admin/stats');
+  let statsDays = 7;
+
+  async function loadStats() {
+    const { data } = await api(`/admin/stats?days=${statsDays}`);
     if (!data || !data.success) {
       toast((data && data.error) || 'Không tải được thống kê', 'error');
       return;
@@ -466,9 +542,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('kpiMessages').textContent = data.totals.messages;
     document.getElementById('kpiProcess').textContent = data.totals.processEntries;
     document.getElementById('kpiPartners').textContent = data.totals.partners;
+    document.getElementById('kpiMessagesLabel').textContent = `Tin nhắn (${data.days} ngày)`;
+    document.getElementById('kpiProcessLabel').textContent = `Mục nhật ký (${data.days} ngày)`;
+    document.getElementById('barChartTitle').textContent = `Tin nhắn ${data.days} ngày gần nhất`;
+    document.querySelectorAll('.stats-range-btn').forEach((btn) => {
+      btn.classList.toggle('is-active', Number(btn.dataset.statsDays) === data.days);
+    });
     renderBarChart(document.getElementById('barChart'), data.messagesByDay);
     renderDonut(data.processByActivity);
     renderTopCustomers(document.getElementById('topCustomers'), data.topCustomers);
+  }
+
+  document.querySelectorAll('.stats-range-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const days = Number(btn.dataset.statsDays);
+      if (days === statsDays) return;
+      statsDays = days;
+      loadStats();
+    });
+  });
+
+  statsBtn.addEventListener('click', async () => {
+    statsOverlay.hidden = false;
+    statsCloseBtn.focus();
+    await loadStats();
   });
   statsCloseBtn.addEventListener('click', closeStats);
   statsOverlay.addEventListener('click', (e) => {
@@ -483,6 +580,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const typing = createTypingSender(socket, () => activeConvId);
   const typingView = createTypingView(messagesArea, scrollBottom);
   const pendingSends = new Map(); // clientId → bubble "đang gửi" chờ server xác nhận
+  const botStreams = new Map(); // clientId → bubble bot đang trả lời (stream)
   wireConnectionIndicator(socket, document.getElementById('connDot'));
 
   socket.on('connect', () => {
@@ -494,11 +592,35 @@ document.addEventListener('DOMContentLoaded', async () => {
       pending.el.remove();
       pendingSends.delete(msg.clientId);
     }
+    const stream = msg.clientId && botStreams.get(msg.clientId);
+    if (stream) {
+      stream.el.remove(); // bot trả lời xong → thay bubble stream bằng tin thật
+      botStreams.delete(msg.clientId);
+    }
     if (msg.convId !== activeConvId) return;
     typingView.hide();
     messagesArea.appendChild(messageEl(msg, msg.senderRole === 'admin'));
     scrollBottom();
     if (msg.senderId !== myUser.id) socket.emit('read', { convId: msg.convId });
+  });
+  // Khách/partner đã đọc thread đang mở → hiện "Đã xem" cho tin admin đã gửi
+  socket.on('read-by', (d) => {
+    if (d.convId !== activeConvId || !d.userSide) return;
+    applySeenStatus(messagesArea, d.seenUpTo, myUser.role);
+  });
+  // Bot chuyên gia đang trả lời khách → bubble stream từng cụm chữ (admin xem ké)
+  socket.on('bot-stream', (d) => {
+    if (d.convId !== activeConvId) return;
+    typingView.hide();
+    let stream = botStreams.get(d.clientId);
+    if (!stream) {
+      stream = botStreamRow('Trợ lý AI');
+      botStreams.set(d.clientId, stream);
+      messagesArea.appendChild(stream.el);
+    }
+    if (d.reset) stream.reset();
+    else stream.append(d.delta);
+    scrollBottom();
   });
   socket.on('typing', (d) => {
     if (d.convId !== activeConvId || d.userId === myUser.id) return;
@@ -512,6 +634,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   socket.on('partner-message', () => {
     clearTimeout(usersReloadTimer);
     usersReloadTimer = setTimeout(loadUsers, 400);
+  });
+  socket.on('bot-unsure', (d) => {
+    toast(`🤔 Bot không chắc câu hỏi của ${d.userName || 'khách'} — bạn nên vào trả lời nhé`, 'warn');
+    playPing();
   });
   socket.on('unread-badge', ({ convId, count }) => {
     const u = latestUsers.find((x) => x.conversation_id === convId);

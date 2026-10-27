@@ -1,0 +1,125 @@
+/* ============================================================
+   auth.css — Trang đăng nhập / đăng ký (index.html)
+   ============================================================ */
+.login-body {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: linear-gradient(165deg, #00398f 0%, #0068ff 52%, #2b7fff 100%);
+}
+/* Khối blob trang trí phía sau */
+.login-body::before,
+.login-body::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.35;
+  animation: blobFloat 14s ease-in-out infinite alternate;
+}
+.login-body::before { width: 420px; height: 420px; background: #7db8ff; top: -120px; left: -120px; }
+.login-body::after { width: 360px; height: 360px; background: rgba(255, 255, 255, 0.55); bottom: -100px; right: -80px; animation-delay: -7s; }
+
+@keyframes blobFloat {
+  from { transform: translate(0, 0) scale(1); }
+  to { transform: translate(60px, 40px) scale(1.15); }
+}
+
+.login-card {
+  position: relative;
+  z-index: 1;
+  width: 380px;
+  max-width: calc(100vw - 2rem);
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 22px;
+  padding: 2rem 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  box-shadow: var(--shadow-lg);
+  animation: cardIn var(--dur-slow) var(--ease-out);
+}
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(24px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
+.login-logo {
+  width: 64px; height: 64px;
+  margin: 0 auto;
+  display: grid; place-items: center;
+  border-radius: 20px;
+  background: var(--brand-grad);
+  box-shadow: 0 8px 20px rgba(0, 104, 255, 0.4);
+  animation: logoPop 0.6s var(--ease-spring) 0.15s backwards;
+}
+.login-logo svg { width: 36px; height: 36px; }
+@keyframes logoPop { from { opacity: 0; transform: scale(0.4) rotate(-15deg); } to { opacity: 1; transform: none; } }
+
+.login-card h1 { font-size: 1.35rem; text-align: center; color: var(--primary-deep); letter-spacing: -0.02em; }
+.login-sub { font-size: 0.85rem; color: var(--muted); text-align: center; margin-top: -0.5rem; }
+.login-hint {
+  font-size: 0.72rem; color: var(--primary-dark); text-align: center;
+  background: var(--primary-faint); border: 1px dashed #bfdbfe;
+  border-radius: 10px; padding: 0.45rem 0.6rem;
+}
+
+.tabs { display: flex; gap: 0.25rem; background: #eef2f7; border-radius: 12px; padding: 4px; }
+.tab {
+  flex: 1; padding: 0.5rem 1rem; background: none; border: none; cursor: pointer;
+  font-size: 0.88rem; font-weight: 500; color: var(--muted);
+  border-radius: 9px; transition: all var(--dur) var(--ease-out);
+}
+.tab.active { background: var(--surface); color: var(--primary-dark); box-shadow: var(--shadow-sm); }
+
+/* Vào nhanh 3 tài khoản demo (User / Admin / Partner) */
+.quick-login { display: flex; flex-direction: column; gap: 0.45rem; }
+.quick-login-label {
+  font-size: 0.68rem; font-weight: 700; color: var(--muted);
+  text-align: center; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.quick-login-row { display: flex; gap: 0.35rem; }
+.quick-account {
+  flex: 1; min-width: 0;
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem;
+  padding: 0.45rem 0.2rem;
+  background: var(--surface); border: 1.5px solid var(--border); border-radius: 12px;
+  font-family: inherit; font-size: 0.72rem; font-weight: 600; color: var(--ink);
+  white-space: nowrap;
+  cursor: pointer; transition: all var(--dur-fast);
+}
+.quick-account:hover:not(:disabled) {
+  border-color: var(--primary); background: var(--primary-faint);
+  transform: translateY(-1px); box-shadow: var(--shadow-sm);
+}
+.quick-account:disabled { opacity: 0.5; cursor: wait; }
+.quick-avatar {
+  width: 20px; height: 20px; flex-shrink: 0;
+  display: grid; place-items: center; border-radius: 50%;
+  font-size: 0.54rem; font-weight: 700; color: #fff;
+}
+.quick-avatar.role-user { background: linear-gradient(135deg, #60a5fa, #2563eb); }
+.quick-avatar.role-admin { background: var(--brand-grad); }
+.quick-avatar.role-partner { background: linear-gradient(135deg, #fbbf24, #d97706); }
+
+#loginForm, #registerForm { display: flex; flex-direction: column; gap: 0.6rem; animation: fadeSlide var(--dur) var(--ease-out); }
+#loginForm[hidden], #registerForm[hidden] { display: none; }
+
+/* .form-field / .btn-primary dùng chung → khai báo trong base.css */
+
+.auth-error {
+  color: #b91c1c; font-size: 0.82rem; text-align: center;
+  background: var(--danger-soft); border-radius: 10px; padding: 0.5rem;
+  animation: shake 0.4s;
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  50% { transform: translateX(5px); }
+  75% { transform: translateX(-3px); }
+}

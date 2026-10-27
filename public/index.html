@@ -8,7 +8,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/auth.css">
 </head>
 <body>
   <div class="login-body">
@@ -22,9 +23,9 @@
       <h1>Tư vấn Nông nghiệp</h1>
       <p class="login-sub">Chat trực tiếp với chuyên gia, kết nối đơn vị đồng hành</p>
 
-      <div class="tabs">
-        <button class="tab active" id="tabLogin" type="button">Đăng nhập</button>
-        <button class="tab" id="tabRegister" type="button">Đăng ký</button>
+      <div class="tabs" id="authTabs" role="tablist" aria-label="Đăng nhập hoặc đăng ký">
+        <button class="tab active" id="tabLogin" type="button" role="tab" aria-selected="true" aria-controls="loginForm" tabindex="0">Đăng nhập</button>
+        <button class="tab" id="tabRegister" type="button" role="tab" aria-selected="false" aria-controls="registerForm" tabindex="-1">Đăng ký</button>
       </div>
 
       <div class="quick-login">
@@ -43,15 +44,15 @@
       </div>
 
       <form id="loginForm">
-        <input class="form-field" type="text" id="loginUsername" placeholder="Tên đăng nhập" autocomplete="username" required>
-        <input class="form-field" type="password" id="loginPassword" placeholder="Mật khẩu" autocomplete="current-password" required>
+        <input class="form-field" type="text" id="loginUsername" placeholder="Tên đăng nhập" aria-label="Tên đăng nhập" autocomplete="username" required>
+        <input class="form-field" type="password" id="loginPassword" placeholder="Mật khẩu" aria-label="Mật khẩu" autocomplete="current-password" required>
         <button class="btn-primary" type="submit">Đăng nhập</button>
       </form>
 
       <form id="registerForm" hidden>
-        <input class="form-field" type="text" id="regDisplayName" placeholder="Họ và tên" required>
-        <input class="form-field" type="text" id="regUsername" placeholder="Tên đăng nhập" autocomplete="username" required>
-        <input class="form-field" type="password" id="regPassword" placeholder="Mật khẩu" autocomplete="new-password" required>
+        <input class="form-field" type="text" id="regDisplayName" placeholder="Họ và tên" aria-label="Họ và tên" required>
+        <input class="form-field" type="text" id="regUsername" placeholder="Tên đăng nhập" aria-label="Tên đăng nhập" autocomplete="username" required>
+        <input class="form-field" type="password" id="regPassword" placeholder="Mật khẩu" aria-label="Mật khẩu" autocomplete="new-password" required>
         <button class="btn-primary" type="submit">Đăng ký</button>
       </form>
 

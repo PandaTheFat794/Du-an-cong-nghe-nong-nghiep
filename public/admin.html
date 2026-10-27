@@ -8,7 +8,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/chat.css">
+  <link rel="stylesheet" href="/css/process.css">
+  <link rel="stylesheet" href="/css/admin.css">
 </head>
 <body data-account-controls="headerControls">
   <div id="root">
@@ -52,14 +55,37 @@
         <h2><span class="status-dot" id="connDot"></span><span id="chatTitle">Chọn một khách hàng để tư vấn</span></h2>
         <div class="chat-controls" id="headerControls">
           <div class="view-tabs header-tabs" id="threadTabs" role="tablist" aria-label="Luồng trò chuyện riêng" hidden>
-            <button class="view-tab active" data-thread="user" role="tab" aria-selected="true" type="button">Khách hàng</button>
-            <button class="view-tab" data-thread="partner" role="tab" aria-selected="false" type="button" id="partnerThreadTab" hidden>Partner</button>
+            <button class="view-tab active" data-thread="user" role="tab" aria-selected="true" tabindex="0" type="button">Khách hàng</button>
+            <button class="view-tab" data-thread="partner" role="tab" aria-selected="false" tabindex="-1" type="button" id="partnerThreadTab" hidden>Partner</button>
           </div>
+          <span class="partner-chip" id="partnerChip" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            <span id="partnerChipName"></span>
+          </span>
+          <button class="chat-btn disconnect-btn" id="disconnectPartnerBtn" type="button" hidden>Hủy liên kết</button>
           <select class="partner-select" id="partnerSelect" hidden aria-label="Chọn Partner"></select>
           <button class="chat-btn" id="connectPartnerBtn" hidden type="button">Kết nối Partner</button>
+          <label class="bot-toggle" id="botToggleWrap" title="Bot AI tự động trả lời khách khi được bật" hidden>
+            <input type="checkbox" id="botToggleInput" aria-label="Bật/tắt Bot AI cho khách hàng">
+            <span class="bot-toggle-track" aria-hidden="true"><span class="bot-toggle-thumb"></span></span>
+            <span class="bot-toggle-label">Bot AI</span>
+          </label>
           <button class="chat-btn" id="processBtn" type="button" hidden>Nhật ký</button>
           <button class="chat-btn" id="statsBtn" type="button" title="Thống kê hệ thống">Thống kê</button>
+          <button class="chat-btn search-toggle-btn" id="searchToggleBtn" type="button" title="Tìm trong lịch sử chat" aria-label="Tìm kiếm tin nhắn" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          </button>
           <button class="chat-btn" id="logoutBtn" type="button">Đăng xuất</button>
+        </div>
+      </div>
+      <div class="chat-search-anchor">
+        <div class="chat-search" id="chatSearch" hidden>
+          <div class="chat-search-bar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="search" id="chatSearchInput" placeholder="Tìm trong cuộc trò chuyện..." autocomplete="off" aria-label="Từ khóa tìm kiếm tin nhắn">
+            <button class="chat-search-close" id="chatSearchClose" type="button" aria-label="Đóng tìm kiếm">×</button>
+          </div>
+          <ul class="chat-search-results" id="chatSearchResults" hidden></ul>
         </div>
       </div>
       <button class="load-more" id="loadMoreBtn" type="button" hidden>Tải tin cũ hơn</button>
@@ -76,7 +102,7 @@
         </button>
         <input type="file" id="attachInput" hidden accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx">
         <input class="input-field" id="msgInput" type="text" placeholder="Nhập tin nhắn..." autocomplete="off" disabled>
-        <button class="input-btn" id="sendBtn" disabled>Gửi
+        <button class="input-btn" id="sendBtn" disabled aria-label="Gửi" title="Gửi">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
         </button>
       </div>
@@ -87,6 +113,11 @@
     <div class="stats-modal" role="dialog" aria-modal="true" aria-labelledby="statsTitle">
       <div class="stats-head">
         <h2 id="statsTitle">Thống kê hệ thống</h2>
+        <div class="stats-range" role="group" aria-label="Chọn khoảng thời gian">
+          <button class="stats-range-btn is-active" type="button" data-stats-days="7">7 ngày</button>
+          <button class="stats-range-btn" type="button" data-stats-days="30">30 ngày</button>
+          <button class="stats-range-btn" type="button" data-stats-days="90">90 ngày</button>
+        </div>
         <button class="stats-close" id="statsCloseBtn" type="button" aria-label="Đóng thống kê">×</button>
       </div>
       <div class="stats-kpis">
@@ -96,11 +127,11 @@
         </div>
         <div class="kpi kpi-blue">
           <span class="kpi-value" id="kpiMessages">–</span>
-          <span class="kpi-label">Tin nhắn</span>
+          <span class="kpi-label" id="kpiMessagesLabel">Tin nhắn</span>
         </div>
         <div class="kpi kpi-amber">
           <span class="kpi-value" id="kpiProcess">–</span>
-          <span class="kpi-label">Mục nhật ký</span>
+          <span class="kpi-label" id="kpiProcessLabel">Mục nhật ký</span>
         </div>
         <div class="kpi kpi-purple">
           <span class="kpi-value" id="kpiPartners">–</span>
@@ -108,7 +139,7 @@
         </div>
       </div>
       <div class="stats-card">
-        <h3>Tin nhắn 7 ngày gần nhất</h3>
+        <h3 id="barChartTitle">Tin nhắn 7 ngày gần nhất</h3>
         <div class="bar-chart" id="barChart" aria-label="Biểu đồ tin nhắn theo ngày"></div>
       </div>
       <div class="stats-row">

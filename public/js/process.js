@@ -1,5 +1,5 @@
 // Nhật ký canh tác: metadata hoạt động, render timeline và drawer dùng chung.
-// Phụ thuộc common.js (api, toast, wireAttachButton, IMAGE_EXT_RE, formatTime).
+// Phụ thuộc common.js (api, toast, uploadFile, IMAGE_EXT_RE, formatTime, openLightbox).
 
 const PROCESS_ACTIVITIES = [
   {
@@ -44,6 +44,20 @@ const PROCESS_ACTIVITY_MAP = PROCESS_ACTIVITIES.reduce((acc, item) => {
   return acc;
 }, {});
 
+// 3 mùa vụ lúa phổ biến (theo tháng thực hiện trong nhật ký)
+const PROCESS_SEASONS = [
+  { key: 'dong-xuan', label: 'Đông Xuân', months: [12, 1, 2, 3, 4] },
+  { key: 'he-thu', label: 'Hè Thu', months: [5, 6, 7, 8] },
+  { key: 'thu-dong', label: 'Thu Đông', months: [9, 10, 11] },
+];
+
+function processSeasonOf(iso) {
+  const m = /^\d{4}-(\d{2})-\d{2}$/.exec(iso || '');
+  if (!m) return null;
+  const month = Number(m[1]);
+  return PROCESS_SEASONS.find((s) => s.months.includes(month)) || null;
+}
+
 function processActivityMeta(key) {
   return PROCESS_ACTIVITY_MAP[key] || PROCESS_ACTIVITY_MAP.other;
 }
@@ -73,6 +87,37 @@ function processIconEl(activity) {
   span.innerHTML = processActivityMeta(activity).icon; // SVG tĩnh trong file này
   span.setAttribute('aria-hidden', 'true');
   return span;
+}
+
+// Một đính kèm {url, name} của mục nhật ký: ảnh (bấm mở lightbox) hoặc link tải tệp
+function processAttachmentEl(att) {
+  const isImage = IMAGE_EXT_RE.test(att.name || att.url);
+  if (isImage) {
+    const media = document.createElement('figure');
+    media.className = 'process-entry-media';
+    const link = document.createElement('a');
+    link.href = att.url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    const img = document.createElement('img');
+    img.src = att.url;
+    img.alt = att.name || 'Ảnh nhật ký canh tác';
+    img.loading = 'lazy';
+    img.title = 'Bấm để xem ảnh to';
+    img.addEventListener('click', (e) => {
+      e.preventDefault(); // xem tại chỗ bằng lightbox; giữ link cho mở tab mới
+      openLightbox(att.url, att.name);
+    });
+    link.appendChild(img);
+    media.appendChild(link);
+    return media;
+  }
+  const link = document.createElement('a');
+  link.className = 'process-entry-file';
+  link.href = att.url;
+  link.download = att.name || 'tai-lieu';
+  link.textContent = `Đính kèm: ${att.name || 'tệp'}`;
+  return link;
 }
 
 function processEmptyEl() {
@@ -176,35 +221,17 @@ function processEntryEl(entry, opts = {}) {
     card.appendChild(details);
   }
 
-  if (entry.attachmentUrl) {
-    const isImage = IMAGE_EXT_RE.test(entry.attachmentName || entry.attachmentUrl);
-    if (isImage) {
-      const media = document.createElement('figure');
-      media.className = 'process-entry-media';
-      const link = document.createElement('a');
-      link.href = entry.attachmentUrl;
-      link.target = '_blank';
-      link.rel = 'noopener';
-      const img = document.createElement('img');
-      img.src = entry.attachmentUrl;
-      img.alt = entry.attachmentName || 'Ảnh nhật ký canh tác';
-      img.loading = 'lazy';
-      img.title = 'Bấm để xem ảnh to';
-      img.addEventListener('click', (e) => {
-        e.preventDefault(); // xem tại chỗ bằng lightbox; giữ link cho mở tab mới
-        openLightbox(entry.attachmentUrl, entry.attachmentName);
-      });
-      link.appendChild(img);
-      media.appendChild(link);
-      card.appendChild(media);
-    } else {
-      const link = document.createElement('a');
-      link.className = 'process-entry-file';
-      link.href = entry.attachmentUrl;
-      link.download = entry.attachmentName || 'tai-lieu';
-      link.textContent = `Đính kèm: ${entry.attachmentName || 'tệp'}`;
-      card.appendChild(link);
-    }
+  const attachments = (entry.attachments && entry.attachments.length)
+    ? entry.attachments
+    : (entry.attachmentUrl ? [{ url: entry.attachmentUrl, name: entry.attachmentName || '' }] : []);
+
+  if (attachments.length === 1) {
+    card.appendChild(processAttachmentEl(attachments[0]));
+  } else if (attachments.length > 1) {
+    const grid = document.createElement('div');
+    grid.className = 'process-entry-media-grid';
+    attachments.forEach((att) => grid.appendChild(processAttachmentEl(att)));
+    card.appendChild(grid);
   }
 
   const foot = document.createElement('div');
@@ -297,8 +324,8 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
           <button class="attach-btn" id="processAttachBtn" type="button" title="Đính kèm ảnh" aria-label="Đính kèm ảnh hoặc tài liệu">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           </button>
-          <input type="file" id="processAttachInput" hidden accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx">
-          <span class="attach-chip process-attach-chip" id="processAttachChip"></span>
+          <input type="file" id="processAttachInput" hidden multiple accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx">
+          <span class="process-attach-chips" id="processAttachChips"></span>
         </div>
         <div class="process-form-actions">
           <button class="btn-primary" id="processSubmitBtn" type="submit">Lưu nhật ký</button>
@@ -307,6 +334,12 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
       </form>
       <div class="process-filters" id="processFilters" hidden>
         <div class="process-filter-row">
+          <label class="process-filter-field">
+            <span>Mùa vụ</span>
+            <select id="processFilterSeason">
+              <option value="">Tất cả mùa vụ</option>
+            </select>
+          </label>
           <label class="process-filter-field">
             <span>Hoạt động</span>
             <select id="processFilterActivity">
@@ -348,14 +381,24 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
   const closeBtn = overlay.querySelector('#processDrawerClose');
   const cancelBtn = overlay.querySelector('#processCancelBtn');
   const submitBtn = overlay.querySelector('#processSubmitBtn');
-  const attachChip = overlay.querySelector('#processAttachChip');
+  const attachBtn = overlay.querySelector('#processAttachBtn');
+  const attachInput = overlay.querySelector('#processAttachInput');
+  const attachChipsEl = overlay.querySelector('#processAttachChips');
   const filtersEl = overlay.querySelector('#processFilters');
+  const filterSeason = overlay.querySelector('#processFilterSeason');
   const filterActivity = overlay.querySelector('#processFilterActivity');
   const filterFrom = overlay.querySelector('#processFilterFrom');
   const filterTo = overlay.querySelector('#processFilterTo');
   const filterReset = overlay.querySelector('#processFilterReset');
   const filterNote = overlay.querySelector('#processFilterNote');
   const exportBtn = overlay.querySelector('#processExportBtn');
+
+  for (const season of PROCESS_SEASONS) {
+    const option = document.createElement('option');
+    option.value = season.key;
+    option.textContent = season.label;
+    filterSeason.appendChild(option);
+  }
 
   for (const activity of PROCESS_ACTIVITIES) {
     const option = document.createElement('option');
@@ -370,26 +413,63 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
   }
 
   let userId = null;
-  let pendingAttachment = null;
+  let pendingAttachments = [];
   let allEntries = [];
   let currentName = '';
 
+  const PROCESS_ATTACH_MAX = 5;
+
   if (canAdd) {
     toolbar.hidden = false;
-    wireAttachButton('processAttachBtn', 'processAttachInput', 'processAttachChip', (res) => {
-      pendingAttachment = res;
+    attachBtn.addEventListener('click', () => attachInput.click());
+    attachInput.addEventListener('change', async () => {
+      const files = Array.from(attachInput.files || []);
+      attachInput.value = '';
+      for (const file of files) {
+        if (pendingAttachments.length >= PROCESS_ATTACH_MAX) {
+          toast(`Tối đa ${PROCESS_ATTACH_MAX} tệp đính kèm mỗi mục nhật ký.`, 'warn');
+          break;
+        }
+        try {
+          const res = await uploadFile(file);
+          pendingAttachments.push(res);
+          renderAttachChips();
+        } catch (e) {
+          toast(e.message, 'error');
+        }
+      }
     });
   } else {
     toolbar.remove();
     form.remove();
   }
 
+  function renderAttachChips() {
+    attachChipsEl.innerHTML = '';
+    pendingAttachments.forEach((item, index) => {
+      const chip = document.createElement('span');
+      chip.className = 'attach-chip process-attach-chip';
+      chip.append(document.createTextNode(item.name || 'tệp'));
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'attach-chip-remove';
+      remove.setAttribute('aria-label', `Gỡ ${item.name || 'tệp'}`);
+      remove.textContent = '×';
+      remove.addEventListener('click', () => {
+        pendingAttachments.splice(index, 1);
+        renderAttachChips();
+      });
+      chip.appendChild(remove);
+      attachChipsEl.appendChild(chip);
+    });
+  }
+
   function resetForm() {
     form.reset();
     dateInput.value = todayIsoDate();
     activitySelect.value = 'sowing';
-    pendingAttachment = null;
-    attachChip.textContent = '';
+    pendingAttachments = [];
+    renderAttachChips();
   }
 
   function close() {
@@ -399,6 +479,7 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
   }
 
   function clearFilterInputs() {
+    filterSeason.value = '';
     filterActivity.value = '';
     filterFrom.value = '';
     filterTo.value = '';
@@ -408,6 +489,10 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
 
   function filteredEntries() {
     return allEntries.filter((entry) => {
+      if (filterSeason.value) {
+        const season = processSeasonOf(entry.performedAt);
+        if (!season || season.key !== filterSeason.value) return false;
+      }
       if (filterActivity.value && entry.activity !== filterActivity.value) return false;
       if (filterFrom.value && (entry.performedAt || '') < filterFrom.value) return false;
       if (filterTo.value && (entry.performedAt || '') > filterTo.value) return false;
@@ -416,7 +501,7 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
   }
 
   function renderFiltered() {
-    const activeFilter = filterActivity.value || filterFrom.value || filterTo.value;
+    const activeFilter = filterSeason.value || filterActivity.value || filterFrom.value || filterTo.value;
     const entries = filteredEntries();
     filtersEl.hidden = !allEntries.length;
     filterNote.textContent = activeFilter ? `Hiển thị ${entries.length}/${allEntries.length} mục` : '';
@@ -432,7 +517,7 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
       const heading = empty.querySelector('h3');
       const desc = empty.querySelector('p');
       if (heading) heading.textContent = 'Không có mục nào khớp bộ lọc';
-      if (desc) desc.textContent = 'Thử chọn hoạt động khác hoặc xóa khoảng ngày để xem toàn bộ nhật ký.';
+      if (desc) desc.textContent = 'Thử chọn mùa vụ/hoạt động khác hoặc xóa khoảng ngày để xem toàn bộ nhật ký.';
       timelineEl.appendChild(empty);
       return;
     }
@@ -472,13 +557,16 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
 
     const rows = [['Hoạt động', 'Ngày thực hiện', 'Tiêu đề', 'Phương pháp', 'Chi tiết', 'Tệp đính kèm']];
     for (const entry of entries) {
+      const attachmentUrls = (entry.attachments && entry.attachments.length)
+        ? entry.attachments
+        : (entry.attachmentUrl ? [{ url: entry.attachmentUrl }] : []);
       rows.push([
         processActivityMeta(entry.activity).label,
         entry.performedAt || '',
         entry.title || '',
         entry.method || '',
         entry.details || '',
-        entry.attachmentUrl ? new URL(entry.attachmentUrl, location.origin).href : '',
+        attachmentUrls.map((a) => new URL(a.url, location.origin).href).join('; '),
       ]);
     }
     const csv = rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
@@ -562,7 +650,7 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
     addToggle.hidden = false;
   });
 
-  for (const el of [filterActivity, filterFrom, filterTo]) {
+  for (const el of [filterSeason, filterActivity, filterFrom, filterTo]) {
     el.addEventListener('input', renderFiltered);
     el.addEventListener('change', renderFiltered);
   }
@@ -579,7 +667,7 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
       method: methodInput.value.trim(),
       details: detailsInput.value.trim(),
     };
-    if (pendingAttachment) body.attachment = pendingAttachment;
+    if (pendingAttachments.length) body.attachments = pendingAttachments;
 
     submitBtn.disabled = true;
     const { status, data } = await api('/process', {

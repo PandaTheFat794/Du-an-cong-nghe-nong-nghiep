@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { requireAuth, requireRole } = require('../auth');
-const { db, ensurePartnerThreads } = require('../db');
+const { db, ensurePartnerThreads, setBotEnabled } = require('../db');
 
 /**
  * GET /api/admin/users
@@ -14,6 +14,7 @@ router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
     `SELECT u.id, u.username, u.display_name, u.role, u.created_at,
             c.id AS conversation_id,
             c.partner_id AS partner_id,
+            c.bot_enabled AS bot_enabled,
             p.display_name AS partner_name,
             lm.content AS last_content,
             lm.attachment_name AS last_attachment_name,
@@ -50,6 +51,7 @@ router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
     conversation_id: u.conversation_id,
     partner_id: u.partner_id,
     partner_name: u.partner_name,
+    bot_enabled: u.bot_enabled === 1,
     partner_conversation_id: u.partner_conversation_id,
     partner_unread: u.partner_unread,
     last_message: u.last_message_time
@@ -64,16 +66,34 @@ router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
 });
 
 /**
- * GET /api/admin/stats
- * Tổng hợp cho dashboard admin: KPI tổng, tin nhắn 7 ngày gần nhất,
- * nhật ký theo hoạt động, top khách hàng nhắn nhiều nhất.
+ * GET /api/admin/stats?days=7|30|90
+ * Tổng hợp cho dashboard admin theo khoảng thời gian (mặc định 7 ngày):
+ * KPI tổng, tin nhắn theo ngày, nhật ký theo hoạt động, top khách hàng.
+ * customers/partners là số toàn hệ thống; messages/processEntries/topCustomers
+ * và 2 biểu đồ chỉ tính trong khoảng đã chọn.
  */
 router.get('/stats', requireAuth, requireRole('admin'), (req, res) => {
+  const days = req.query.days === undefined ? 7 : Number(req.query.days);
+  if (![7, 30, 90].includes(days)) {
+    return res.status(400).json({ error: 'days phải là 7, 30 hoặc 90' });
+  }
+
+  // Mốc đầu ngày local, tính lùi days-1 ngày (hôm nay + days-1 ngày trước = đủ days ngày)
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+  const pad = (n) => String(n).padStart(2, '0');
+  const startDate = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
+
   const totals = {
     customers: db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'user'").get().c,
     partners: db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'partner'").get().c,
-    messages: db.prepare('SELECT COUNT(*) AS c FROM messages').get().c,
-    processEntries: db.prepare('SELECT COUNT(*) AS c FROM process_entries').get().c,
+    messages: db.prepare(
+      "SELECT COUNT(*) AS c FROM messages WHERE date(created_at, 'localtime') >= ?"
+    ).get(startDate).c,
+    processEntries: db.prepare(
+      'SELECT COUNT(*) AS c FROM process_entries WHERE performed_at >= ?'
+    ).get(startDate).c,
   };
 
   const byDayMap = new Map(
@@ -81,9 +101,8 @@ router.get('/stats', requireAuth, requireRole('admin'), (req, res) => {
       "SELECT date(created_at, 'localtime') AS day, COUNT(*) AS cnt FROM messages GROUP BY day"
     ).all().map((r) => [r.day, r.cnt])
   );
-  const pad = (n) => String(n).padStart(2, '0');
   const messagesByDay = [];
-  for (let i = 6; i >= 0; i -= 1) {
+  for (let i = days - 1; i >= 0; i -= 1) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -91,17 +110,18 @@ router.get('/stats', requireAuth, requireRole('admin'), (req, res) => {
   }
 
   const processByActivity = db.prepare(
-    'SELECT activity, COUNT(*) AS count FROM process_entries GROUP BY activity ORDER BY count DESC'
-  ).all();
+    `SELECT activity, COUNT(*) AS count FROM process_entries
+     WHERE performed_at >= ? GROUP BY activity ORDER BY count DESC`
+  ).all(startDate);
 
   const topCustomers = db.prepare(
     `SELECT u.id, u.display_name, COUNT(m.id) AS message_count
      FROM users u JOIN messages m ON m.sender_id = u.id
-     WHERE u.role = 'user'
+     WHERE u.role = 'user' AND date(m.created_at, 'localtime') >= ?
      GROUP BY u.id ORDER BY message_count DESC, u.id ASC LIMIT 5`
-  ).all();
+  ).all(startDate);
 
-  res.json({ success: true, totals, messagesByDay, processByActivity, topCustomers });
+  res.json({ success: true, days, totals, messagesByDay, processByActivity, topCustomers });
 });
 
 /**
@@ -148,6 +168,44 @@ router.post('/conversations/:convId/connect', requireAuth, requireRole('admin'),
     partnerConversationId: adminThread.id,
     partnerUserConversationId: userThread.id,
   });
+});
+
+/**
+ * POST /api/admin/conversations/:convId/disconnect
+ * Hủy liên kết partner khỏi khách hàng. Giữ nguyên 2 thread partner_user/partner_admin
+ * để bảo toàn lịch sử; partner mất quyền truy cập ngay vì canAccessConversation
+ * kiểm tra lại user_admin.partner_id mỗi lần access.
+ */
+router.post('/conversations/:convId/disconnect', requireAuth, requireRole('admin'), (req, res) => {
+  const convId = parseInt(req.params.convId, 10);
+  const conversation = db
+    .prepare("SELECT * FROM conversations WHERE id = ? AND kind = 'user_admin'")
+    .get(convId);
+  if (!conversation) {
+    return res.status(404).json({ error: 'Conversation không tồn tại' });
+  }
+  db.prepare('UPDATE conversations SET partner_id = NULL WHERE id = ?').run(convId);
+  res.json({ success: true, conversationId: convId });
+});
+
+/**
+ * POST /api/admin/conversations/:convId/bot
+ * Admin bật/tắt bot chuyên gia cho thread user_admin của khách (body: { enabled }).
+ */
+router.post('/conversations/:convId/bot', requireAuth, requireRole('admin'), (req, res) => {
+  const convId = parseInt(req.params.convId, 10);
+  const { enabled } = req.body || {};
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'Thiếu enabled (true/false)' });
+  }
+  const conversation = db
+    .prepare("SELECT * FROM conversations WHERE id = ? AND kind = 'user_admin'")
+    .get(convId);
+  if (!conversation) {
+    return res.status(404).json({ error: 'Conversation không tồn tại' });
+  }
+  setBotEnabled(convId, enabled);
+  res.json({ success: true, conversationId: convId, botEnabled: enabled });
 });
 
 /**

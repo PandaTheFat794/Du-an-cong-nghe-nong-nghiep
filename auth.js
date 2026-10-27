@@ -1,5 +1,29 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { getUserByUsername } = require('./db');
+
+/**
+ * Lấy (hoặc tạo) CSRF token gắn với session hiện tại.
+ * Token sống theo session; session regenerate khi login → token mới.
+ */
+function getOrCreateCsrfToken(req) {
+  if (!req.session.csrfToken) {
+    req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+  }
+  return req.session.csrfToken;
+}
+
+/**
+ * Middleware chặn request đổi dữ liệu không kèm CSRF token hợp lệ.
+ * Client gửi token qua header X-CSRF-Token (lấy từ GET /api/csrf).
+ */
+function requireCsrf(req, res, next) {
+  const token = req.get('x-csrf-token') || (req.body && req.body._csrf);
+  if (!req.session || !req.session.csrfToken || token !== req.session.csrfToken) {
+    return res.status(403).json({ error: 'CSRF token không hợp lệ hoặc thiếu' });
+  }
+  next();
+}
 
 /**
  * Lấy thông tin user hiện tại từ session (gán bởi express-session)
@@ -94,4 +118,6 @@ function me(req, res) {
   res.status(401).json({ error: 'Chưa đăng nhập' });
 }
 
-module.exports = { requireAuth, requireRole, login, logout, me };
+module.exports = {
+  requireAuth, requireRole, login, logout, me, getOrCreateCsrfToken, requireCsrf,
+};
