@@ -41,6 +41,7 @@ async function uploadFile(file) {
 }
 
 const IMAGE_EXT_RE = /\.(jpe?g|png|gif|webp)$/i;
+const AUDIO_EXT_RE = /\.(webm|ogg|oga|mp3|wav|m4a)$/i;
 
 // SQLite datetime('now') trả về UTC dạng "YYYY-MM-DD HH:MM:SS"
 function parseDbTime(value) {
@@ -77,12 +78,23 @@ function messageEl(msg, mine, cssBase = 'message') {
   }
 
   if (msg.attachmentUrl) {
-    if (IMAGE_EXT_RE.test(msg.attachmentName || msg.attachmentUrl)) {
+    const name = msg.attachmentName || msg.attachmentUrl;
+    if (IMAGE_EXT_RE.test(name)) {
       const img = document.createElement('img');
       img.className = `${cssBase}-img`;
       img.src = msg.attachmentUrl;
       img.alt = msg.attachmentName || 'hình ảnh';
+      img.title = 'Bấm để xem ảnh to';
+      img.addEventListener('click', () => openLightbox(msg.attachmentUrl, msg.attachmentName));
       div.appendChild(img);
+    } else if (AUDIO_EXT_RE.test(name)) {
+      const audio = document.createElement('audio');
+      audio.className = `${cssBase}-audio`;
+      audio.controls = true;
+      audio.preload = 'metadata';
+      audio.src = msg.attachmentUrl;
+      audio.title = `Tin nhắn thoại: ${name}`;
+      div.appendChild(audio);
     } else {
       const link = document.createElement('a');
       link.className = `${cssBase}-file`;
@@ -195,6 +207,113 @@ function toast(message, type = 'info', duration = 3500) {
   }, duration);
 }
 
+// ===== Lightbox xem ảnh to =====
+let lightboxEl = null;
+
+function closeLightbox() {
+  if (!lightboxEl || lightboxEl.hidden) return;
+  lightboxEl.classList.remove('open');
+  document.body.classList.remove('lightbox-open');
+  setTimeout(() => {
+    // Đã mở ảnh khác ngay sau khi đóng → không ẩn lightbox mới
+    if (!lightboxEl.classList.contains('open')) {
+      lightboxEl.hidden = true;
+      lightboxEl.querySelector('img').src = '';
+    }
+  }, 200);
+}
+
+function openLightbox(src, alt) {
+  if (!lightboxEl) {
+    lightboxEl = document.createElement('div');
+    lightboxEl.className = 'lightbox';
+    lightboxEl.hidden = true;
+    lightboxEl.setAttribute('role', 'dialog');
+    lightboxEl.setAttribute('aria-label', 'Xem ảnh phóng to');
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'lightbox-close';
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', 'Đóng');
+    closeBtn.textContent = '×';
+
+    const img = document.createElement('img');
+    img.alt = '';
+
+    lightboxEl.appendChild(closeBtn);
+    lightboxEl.appendChild(img);
+    lightboxEl.addEventListener('click', (e) => {
+      if (e.target !== img) closeLightbox();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeLightbox();
+    });
+    document.body.appendChild(lightboxEl);
+  }
+  const img = lightboxEl.querySelector('img');
+  img.src = src;
+  img.alt = alt || '';
+  lightboxEl.hidden = false;
+  document.body.classList.add('lightbox-open');
+  requestAnimationFrame(() => lightboxEl.classList.add('open'));
+}
+
+// ===== Âm thanh thông báo (Web Audio, không cần file asset) =====
+let audioCtx = null;
+let lastPingAt = 0;
+
+function playPing() {
+  const now = Date.now();
+  if (now - lastPingAt < 1200) return;
+  lastPingAt = now;
+  try {
+    if (!audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      audioCtx = new Ctx();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const t0 = audioCtx.currentTime;
+    [880, 1174.66].forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const start = t0 + i * 0.12;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.12, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.18);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(start);
+      osc.stop(start + 0.2);
+    });
+  } catch { /* trình duyệt chặn audio khi chưa tương tác */ }
+}
+
+// ===== Số tin chưa đọc trên title tab =====
+const unreadTitle = (() => {
+  const base = document.title;
+  const counts = new Map();
+  function render() {
+    const total = [...counts.values()].reduce((s, n) => s + n, 0);
+    document.title = total > 0 ? `(${total}) ${base}` : base;
+  }
+  return {
+    bump(key) {
+      counts.set(key, (counts.get(key) || 0) + 1);
+      render();
+    },
+    clear(key) {
+      if (counts.delete(key)) render();
+    },
+    setAll(total) {
+      counts.clear();
+      if (total > 0) counts.set('__all__', total);
+      render();
+    },
+  };
+})();
+
 // ===== Avatar chữ cái đầu (TDK của tên hiển thị) =====
 function initialsOf(name) {
   const words = String(name || '?').trim().split(/\s+/);
@@ -299,4 +418,208 @@ function wireAttachButton(attachBtnId, fileInputId, chipId, onResult) {
       toast(e.message, 'error');
     }
   });
+}
+
+// ===== Ghi âm tin nhắn (MediaRecorder) =====
+const VOICE_MIME_CANDIDATES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/ogg;codecs=opus',
+  'audio/ogg',
+  'audio/mp4',
+];
+
+function voiceExtFor(mime) {
+  if (/ogg/.test(mime)) return 'ogg';
+  if (/mp4|aac/.test(mime)) return 'm4a';
+  if (/wav/.test(mime)) return 'wav';
+  if (/mpeg|mp3/.test(mime)) return 'mp3';
+  return 'webm';
+}
+
+/**
+ * Bấm micro để ghi âm, bấm lần nữa để dừng → tự upload và gọi onRecorded(res, convId).
+ * - canStart(): chặn khi chưa chọn hội thoại / đang có file đính kèm
+ * - convId được chụp lúc bắt đầu ghi; người gọi tự kiểm tra đã chuyển thread chưa
+ * Trả về { cancel, isRecording } để hủy khi đổi cuộc trò chuyện.
+ */
+function wireVoiceRecorder({ buttonId, chipId, canStart, getConvId, onRecorded, maxSeconds = 60 }) {
+  const btn = document.getElementById(buttonId);
+  const chip = chipId ? document.getElementById(chipId) : null;
+  if (!btn) return null;
+
+  // Khóa ô nhập + nút gửi/đính kèm trong lúc ghi để tránh gửi lẫn
+  const lockables = [...(btn.closest('.input-area')?.querySelectorAll('.attach-btn, .input-btn, .input-field') || [])]
+    .filter((el) => el !== btn);
+  const wasDisabled = new Map();
+  let recorder = null;
+  let stream = null;
+  let chunks = [];
+  let startedAt = 0;
+  let tickTimer = null;
+  let autoStopTimer = null;
+  let activeSession = null;
+
+  function setChip(text) {
+    if (chip) chip.textContent = text;
+  }
+
+  function setRecordingUI(recording) {
+    btn.classList.toggle('recording', recording);
+    btn.setAttribute('aria-pressed', recording ? 'true' : 'false');
+    btn.title = recording ? 'Dừng ghi âm và gửi' : 'Ghi âm tin nhắn';
+    btn.setAttribute('aria-label', btn.title);
+    if (recording) {
+      for (const el of lockables) {
+        wasDisabled.set(el, el.disabled);
+        el.disabled = true;
+      }
+    } else {
+      for (const [el, disabled] of wasDisabled) el.disabled = disabled;
+      wasDisabled.clear();
+    }
+  }
+
+  function releaseStream() {
+    clearInterval(tickTimer);
+    clearTimeout(autoStopTimer);
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      stream = null;
+    }
+  }
+
+  function reset() {
+    releaseStream();
+    recorder = null;
+    chunks = [];
+    activeSession = null;
+    setChip('');
+    setRecordingUI(false);
+  }
+
+  async function start() {
+    if (activeSession) return;
+    if (canStart && !canStart()) {
+      toast('Hãy gửi hoặc bỏ đính kèm hiện tại trước khi ghi âm.', 'info');
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+      toast('Trình duyệt không hỗ trợ ghi âm trực tiếp.', 'error');
+      return;
+    }
+
+    const session = { cancelled: false, convId: getConvId ? getConvId() : null };
+    let media;
+    try {
+      media = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      toast('Không truy cập được micro. Hãy kiểm tra quyền trình duyệt.', 'error');
+      return;
+    }
+    if (session.cancelled) {
+      media.getTracks().forEach((track) => track.stop());
+      return;
+    }
+
+    const mimeType = VOICE_MIME_CANDIDATES.find(
+      (m) => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)
+    ) || '';
+    try {
+      recorder = mimeType ? new MediaRecorder(media, { mimeType }) : new MediaRecorder(media);
+    } catch {
+      media.getTracks().forEach((track) => track.stop());
+      toast('Không khởi động được bộ ghi âm.', 'error');
+      return;
+    }
+
+    stream = media;
+    activeSession = session;
+    chunks = [];
+    startedAt = Date.now();
+    recorder.addEventListener('dataavailable', (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    });
+    recorder.addEventListener('stop', () => finish(session));
+    recorder.start();
+    setRecordingUI(true);
+
+    const tick = () => {
+      const seconds = Math.floor((Date.now() - startedAt) / 1000);
+      const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
+      const ss = String(seconds % 60).padStart(2, '0');
+      setChip(`● Đang ghi âm ${mm}:${ss} — bấm micro để dừng`);
+    };
+    tick();
+    tickTimer = setInterval(tick, 500);
+    autoStopTimer = setTimeout(() => {
+      if (activeSession === session) {
+        toast(`Đã đạt giới hạn ${maxSeconds} giây, bản ghi âm được gửi.`, 'info');
+        stop();
+      }
+    }, maxSeconds * 1000);
+  }
+
+  async function finish(session) {
+    const duration = Date.now() - startedAt;
+    const mime = (recorder && recorder.mimeType) || 'audio/webm';
+    const blob = new Blob(chunks, { type: mime });
+    releaseStream();
+    recorder = null;
+    chunks = [];
+    activeSession = null;
+    setRecordingUI(false);
+
+    if (session.cancelled) {
+      setChip('');
+      return;
+    }
+    if (duration < 600 || !blob.size) {
+      setChip('');
+      toast('Bản ghi quá ngắn, hãy giữ micro lâu hơn một chút.', 'info');
+      return;
+    }
+
+    setChip('Đang tải bản ghi âm...');
+    const ext = voiceExtFor(mime);
+    const file = new File([blob], `ghi-am-${Date.now()}.${ext}`, { type: mime });
+    try {
+      const res = await uploadFile(file);
+      if (session.cancelled) {
+        setChip('');
+        return;
+      }
+      setChip('');
+      onRecorded(res, session.convId);
+    } catch (e) {
+      setChip('');
+      toast(e.message, 'error');
+    }
+  }
+
+  function stop() {
+    if (recorder && recorder.state !== 'inactive') {
+      try { recorder.stop(); } catch { reset(); }
+    }
+  }
+
+  function cancel() {
+    if (!activeSession) return;
+    activeSession.cancelled = true;
+    // Mở khóa ngay để nơi gọi (vd resetChatArea) kịp disable lại theo trạng thái mới
+    setChip('');
+    setRecordingUI(false);
+    if (recorder && recorder.state !== 'inactive') {
+      try { recorder.stop(); } catch { reset(); }
+    } else {
+      reset(); // đang upload: bỏ kết quả, finish() sẽ thấy cancelled
+    }
+  }
+
+  btn.addEventListener('click', () => {
+    if (activeSession) stop();
+    else start();
+  });
+
+  return { cancel, isRecording: () => !!activeSession };
 }

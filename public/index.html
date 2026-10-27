@@ -27,6 +27,21 @@
         <button class="tab" id="tabRegister" type="button">Đăng ký</button>
       </div>
 
+      <div class="quick-login">
+        <span class="quick-login-label">Vào nhanh tài khoản demo</span>
+        <div class="quick-login-row">
+          <button class="quick-account" type="button" data-quick-user="user1" data-quick-pass="user123">
+            <span class="quick-avatar role-user">KH</span>Khách hàng
+          </button>
+          <button class="quick-account" type="button" data-quick-user="admin" data-quick-pass="admin123">
+            <span class="quick-avatar role-admin">AD</span>Admin
+          </button>
+          <button class="quick-account" type="button" data-quick-user="partner1" data-quick-pass="admin123">
+            <span class="quick-avatar role-partner">PT</span>Partner
+          </button>
+        </div>
+      </div>
+
       <form id="loginForm">
         <input class="form-field" type="text" id="loginUsername" placeholder="Tên đăng nhập" autocomplete="username" required>
         <input class="form-field" type="password" id="loginPassword" placeholder="Mật khẩu" autocomplete="current-password" required>

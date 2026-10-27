@@ -94,7 +94,12 @@ async function headerOverflow(page) {
   let browser = null;
   try {
     await waitForServer();
-    browser = await chromium.launch({ executablePath: EXEC, headless: true });
+    browser = await chromium.launch({
+      executablePath: EXEC,
+      headless: true,
+      // Cho phép test ghi âm bằng micro giả của Chromium
+      args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+    });
 
     // ===== Trang đăng nhập =====
     const ctxL = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -107,6 +112,16 @@ async function headerOverflow(page) {
     await L.click('#tabRegister');
     await L.waitForTimeout(400);
     await L.screenshot({ path: SHOT('00b-dang-ky.png') });
+
+    const quickLabels = await L.locator('.quick-account').allInnerTexts();
+    assert(quickLabels.length === 3
+      && quickLabels.some((t) => t.includes('Khách hàng'))
+      && quickLabels.some((t) => t.includes('Admin'))
+      && quickLabels.some((t) => t.includes('Partner')),
+      '🔍 trang login có 3 nút vào nhanh User/Admin/Partner', quickLabels.join(' | '));
+    await L.click('.quick-account[data-quick-user="admin"]');
+    await L.waitForURL('**/admin', { timeout: 10000 });
+    ok('bấm nút Admin → vào thẳng /admin, không cần gõ mật khẩu', L.url());
 
     // ===== User vào /chat =====
     const ctxU = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -152,12 +167,33 @@ async function headerOverflow(page) {
     ok('drawer nhật ký đóng được sau khi lưu');
 
     // ===== Admin vào /admin =====
-    const ctxA = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const ctxA = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      permissions: ['microphone'],
+    });
     const A = await login(ctxA, 'admin', 'admin123', '/admin');
     ok('admin login → redirect /admin', A.url());
     await A.waitForSelector('.user-item');
     const badge = await A.locator('.user-unread:not(.partner)').first().innerText();
     assert(badge === '1', 'sidebar admin hiện badge unread = 1', `badge="${badge}"`);
+    const stats = await A.evaluate(() => ({
+      customers: document.getElementById('statCustomers').textContent,
+      unread: document.getElementById('statUnread').textContent,
+      partner: document.getElementById('statPartnerUnread').textContent,
+      process: document.getElementById('statProcess').textContent,
+    }));
+    assert(stats.customers === '1' && stats.unread === '1' && stats.partner === '0' && stats.process === '1',
+      'sidebar admin có 4 thẻ tổng quan đúng số liệu', JSON.stringify(stats));
+
+    // 🔍 tìm khách không tồn tại → empty state, Esc xóa lọc khôi phục danh sách
+    await A.fill('#adminSearch', 'khong-co-ai');
+    await A.waitForFunction(() => document.querySelectorAll('#adminUserList .user-item').length === 0, null, { timeout: 3000 });
+    const searchEmpty = await A.locator('#adminUserList .no-partner').innerText();
+    assert(searchEmpty.includes('Không tìm thấy'), '🔍 tìm khách không tồn tại → danh sách trống + gợi ý', searchEmpty);
+    await A.press('#adminSearch', 'Escape');
+    await A.waitForFunction(() => document.querySelectorAll('#adminUserList .user-item').length === 1, null, { timeout: 3000 });
+    ok('Esc trong ô tìm kiếm → xóa từ khóa, danh sách khách hiện lại');
+
     await A.screenshot({ path: SHOT('02-admin-sidebar.png') });
 
     await A.click('.user-item');
@@ -171,6 +207,8 @@ async function headerOverflow(page) {
     }, null, { timeout: 5000 }).catch(() => {});
     const badgeHidden = await A.locator('.user-unread:not(.partner)').first().isVisible().catch(() => false);
     assert(!badgeHidden, 'admin mở chat → badge unread bị ẩn (socket read)', `visible=${badgeHidden}`);
+    const unreadStatAfterRead = await A.locator('#statUnread').innerText();
+    assert(unreadStatAfterRead === '0', 'thẻ "Tin khách chưa đọc" cập nhật về 0 realtime', `stat=${unreadStatAfterRead}`);
 
     // ===== Typing indicator: admin soạn → user thấy bubble 3 chấm =====
     await A.locator('#msgInput').pressSequentially('Đang soạn', { delay: 60 });
@@ -209,6 +247,44 @@ async function headerOverflow(page) {
     await U.waitForTimeout(350);
     await U.screenshot({ path: SHOT('03-user-nhan-anh.png') });
 
+    // ===== Lightbox xem ảnh to trong chat =====
+    await U.click('.message.admin img');
+    await U.waitForSelector('.lightbox', { state: 'visible', timeout: 4000 });
+    const lbSrc = await U.locator('.lightbox img').getAttribute('src');
+    assert((lbSrc || '').includes('/uploads/'), '🔍 bấm ảnh tin nhắn → lightbox hiện ảnh to', lbSrc || 'null');
+    await U.waitForTimeout(300);
+    await U.screenshot({ path: SHOT('03c-lightbox.png') });
+    await U.keyboard.press('Escape');
+    await U.waitForSelector('.lightbox', { state: 'hidden', timeout: 4000 });
+    ok('🔍 Esc → đóng lightbox');
+
+    // ===== Ghi âm tin nhắn thoại (micro giả của Chromium) =====
+    assert(await A.locator('#voiceBtn').isVisible(), 'admin thấy nút ghi âm trong khung chat');
+    await A.click('#voiceBtn');
+    try {
+      await A.waitForSelector('#voiceBtn.recording', { timeout: 5000 });
+      ok('🎙️ bấm micro → vào trạng thái ghi âm (nút đỏ)');
+      await A.waitForFunction(() => document.getElementById('attachChip').textContent.includes('Đang ghi âm'), null, { timeout: 3000 });
+      ok('chip hiện đồng hồ đếm khi đang ghi');
+      await A.waitForTimeout(1400);
+      await A.screenshot({ path: SHOT('06-admin-dang-ghi-am.png') });
+      await A.click('#voiceBtn');
+      await A.waitForSelector('#messagesArea .message.user:not(.pending) audio', { timeout: 15000 });
+      ok('dừng ghi → tự upload + gửi bubble có <audio>');
+      const audioSrc = await A.locator('#messagesArea .message.user audio').last().getAttribute('src');
+      assert(/^\/uploads\/.*\.(webm|ogg|m4a)$/.test(audioSrc || ''), 'audio trỏ tới file đã upload', audioSrc || 'null');
+      await A.waitForFunction(() => !document.querySelector('#voiceBtn.recording'), null, { timeout: 4000 });
+      assert(!(await A.locator('#msgInput').isDisabled()), 'kết thúc ghi âm → mở khóa ô nhập');
+      try {
+        await U.waitForSelector('#messagesArea .message.admin audio', { timeout: 10000 });
+        ok('⚡ user nhận tin nhắn thoại realtime');
+      } catch { bad('user nhận tin nhắn thoại', 'không thấy <audio> sau 10s'); }
+      await U.waitForTimeout(350);
+      await U.screenshot({ path: SHOT('03b-user-nhan-audio.png') });
+    } catch (e) {
+      bad('ghi âm tin nhắn', e.message.split('\n')[0]);
+    }
+
     // ===== Admin gán Partner qua UI =====
     await A.selectOption('#partnerSelect', { label: 'Partner Test' });
     await A.click('#connectPartnerBtn');
@@ -230,13 +306,47 @@ async function headerOverflow(page) {
     await A.waitForSelector('.process-overlay.open .process-entry', { timeout: 5000 });
     const adminProc = await A.locator('.process-entry-title').first().innerText();
     assert(adminProc.includes('Bón lót'), 'admin mở Nhật ký → thấy mục user vừa ghi', adminProc);
+
+    // 🔍 lọc theo hoạt động không có mục → empty state riêng, nút xuất bị khóa
+    await A.selectOption('#processFilterActivity', 'watering');
+    await A.waitForSelector('.process-empty-filtered', { timeout: 3000 });
+    const filterEmptyTxt = await A.locator('.process-empty-filtered h3').innerText();
+    const filterNoteTxt = await A.locator('#processFilterNote').innerText();
+    assert(filterEmptyTxt.includes('khớp bộ lọc'), '🔍 lọc hoạt động không có mục → empty state riêng', filterEmptyTxt);
+    assert(filterNoteTxt.includes('0/1'), 'bộ lọc hiện số mục khớp/tổng', filterNoteTxt);
+    assert(await A.locator('#processExportBtn').isDisabled(), '🔍 không có mục khớp → nút Xuất CSV bị khóa');
+
+    // 🔍 lọc khoảng ngày loại mục cũ → vẫn giữ được dữ liệu gốc khi xóa lọc
+    await A.click('#processFilterReset');
+    await A.waitForSelector('.process-entry', { timeout: 3000 });
+    await A.fill('#processFilterFrom', '2026-10-21');
+    await A.waitForSelector('.process-empty-filtered', { timeout: 3000 });
+    assert((await A.locator('#processFilterNote').innerText()).includes('0/1'),
+      '🔍 lọc "Từ ngày" sau ngày ghi → loại đúng mục cũ');
+    await A.click('#processFilterReset');
+    await A.waitForSelector('.process-entry', { timeout: 3000 });
+    ok('xóa lọc → timeline hiện lại đủ mục');
+
+    // Xuất CSV theo bộ lọc
+    const [download] = await Promise.all([
+      A.waitForEvent('download', { timeout: 8000 }),
+      A.click('#processExportBtn'),
+    ]);
+    const csv = fs.readFileSync(await download.path(), 'utf8');
+    assert(download.suggestedFilename().endsWith('.csv')
+      && csv.includes('Bón phân') && csv.includes('Bón lót vụ đông'),
+      'xuất CSV nhật ký đúng tên file + dữ liệu', download.suggestedFilename());
+
     await A.waitForTimeout(450);
     await A.screenshot({ path: SHOT('04b-admin-nhat-ky.png') });
     await A.click('#processDrawerClose');
     await A.waitForSelector('.process-overlay', { state: 'hidden', timeout: 4000 });
 
     // ===== Partner: nhật ký + 2 luồng chat riêng =====
-    const ctxP = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const ctxP = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      permissions: ['microphone'],
+    });
     const P = await login(ctxP, 'partner1', 'admin123', '/partner');
     ok('partner1 login → redirect /partner', P.url());
     await P.waitForSelector('.partner-item');
@@ -280,6 +390,21 @@ async function headerOverflow(page) {
     const adminLeak = await A.locator('#messagesArea .message.role-partner').count();
     assert(adminLeak === 0, '🔍 admin KHÔNG thấy tin partner↔khách (cách ly thread)', `role-partner=${adminLeak}`);
 
+    // Partner ghi âm trong luồng khách (dùng chung wireVoiceRecorder)
+    assert(await P.locator('#voiceBtn').isVisible(), 'partner thấy nút ghi âm trong khung chat');
+    await P.click('#voiceBtn');
+    try {
+      await P.waitForSelector('#voiceBtn.recording', { timeout: 5000 });
+      await P.waitForTimeout(1000);
+      await P.click('#voiceBtn');
+      await P.waitForSelector('#partnerMessages .message.user:not(.pending) audio', { timeout: 15000 });
+      ok('🎙️ partner ghi âm → tự gửi bubble audio trong luồng khách');
+      const pAudio = await P.locator('#partnerMessages .message.user audio').last().getAttribute('src');
+      assert(/^\/uploads\/.*\.(webm|ogg|m4a)$/.test(pAudio || ''), 'audio của partner trỏ tới file upload', pAudio || 'null');
+    } catch (e) {
+      bad('partner ghi âm', e.message.split('\n')[0]);
+    }
+
     // Partner → admin (riêng tư) → badge amber, không lẫn vào chat khách
     await P.click('.view-tab[data-view="admin"]');
     await P.waitForSelector('#chatPane:visible', { timeout: 4000 });
@@ -292,8 +417,12 @@ async function headerOverflow(page) {
     await A.waitForSelector('.user-unread.partner:visible', { timeout: 8000 });
     const partnerBadgeTxt = await A.locator('.user-unread.partner').first().innerText();
     assert(partnerBadgeTxt === '1', 'sidebar admin hiện badge partner riêng khi partner nhắn', `badge="${partnerBadgeTxt}"`);
+    const partnerStat = await A.locator('#statPartnerUnread').innerText();
+    assert(partnerStat === '1', 'thẻ "Tin partner chưa đọc" cập nhật realtime', `stat=${partnerStat}`);
     const adminPartnerLeak = await A.locator('#messagesArea .message.role-partner').count();
     assert(adminPartnerLeak === 0, '🔍 admin đang mở chat khách → tin partner không lẫn vào khung chat', `role-partner=${adminPartnerLeak}`);
+    const titleUnreadA = await A.title();
+    assert(titleUnreadA.includes('(1)'), '🔍 title tab admin hiện (1) khi có tin chưa đọc', titleUnreadA);
     await A.screenshot({ path: SHOT('05b-admin-badge-partner.png') });
 
     // Admin chuyển sang tab Partner: thấy tin, badge ẩn, trả lời
@@ -311,6 +440,9 @@ async function headerOverflow(page) {
     }, null, { timeout: 5000 }).catch(() => {});
     assert(!(await A.locator('.user-unread.partner').first().isVisible().catch(() => false)),
       'admin mở tab Partner → badge partner bị ẩn (đã đọc)');
+    const partnerStatAfterRead = await A.locator('#statPartnerUnread').innerText();
+    assert(partnerStatAfterRead === '0', 'thẻ "Tin partner chưa đọc" về 0 sau khi mở tab', `stat=${partnerStatAfterRead}`);
+    assert(!(await A.title()).includes('('), 'mở tab Partner → title admin hết số chưa đọc', await A.title());
     const clippedPartnerTab = await headerOverflow(A);
     assert(clippedPartnerTab.length === 0, 'header admin (tab Partner) không tràn nút ra ngoài khung', clippedPartnerTab.join(' | ') || 'không tràn');
     await A.waitForTimeout(400);
@@ -357,6 +489,8 @@ async function headerOverflow(page) {
       () => ok('⚡ partner đang ở tab admin → tab khách hiện chấm tin mới'),
       () => bad('partner không thấy chấm tin mới ở tab khách', 'timeout 6s')
     );
+    const titleUnreadP = await P.title();
+    assert(titleUnreadP.includes('(1)'), '🔍 title tab partner hiện (1) khi khách nhắn thread khác', titleUnreadP);
     await P.click('.view-tab[data-view="customer"]');
     await P.waitForFunction(
       () => [...document.querySelectorAll('#partnerMessages .message')].some((el) => el.textContent.includes('Cảm ơn partner')),
@@ -367,11 +501,35 @@ async function headerOverflow(page) {
     );
     assert(!(await P.locator('.view-tab[data-view="customer"]').evaluate((el) => el.classList.contains('has-new'))),
       'mở tab khách → chấm tin mới được xóa');
+    assert(!(await P.title()).includes('('), 'mở tab khách → title partner hết số chưa đọc', await P.title());
     await P.waitForTimeout(400);
     await P.screenshot({ path: SHOT('06-partner-chat-khach.png') });
 
     const adminLeakUserPartner = await A.locator('#messagesArea .message').filter({ hasText: 'Cảm ơn partner' }).count();
     assert(adminLeakUserPartner === 0, '🔍 admin KHÔNG thấy tin khách↔partner', `leak=${adminLeakUserPartner}`);
+
+    // ===== Dashboard thống kê admin =====
+    await A.click('#statsBtn');
+    await A.waitForSelector('#statsOverlay', { state: 'visible', timeout: 4000 });
+    await A.waitForFunction(() => document.getElementById('kpiCustomers').textContent === '1', null, { timeout: 6000 });
+    const kpis = await A.evaluate(() => ({
+      customers: document.getElementById('kpiCustomers').textContent,
+      messages: Number(document.getElementById('kpiMessages').textContent),
+      process: document.getElementById('kpiProcess').textContent,
+      partners: document.getElementById('kpiPartners').textContent,
+      bars: document.querySelectorAll('#barChart .bar-col').length,
+      legend: document.querySelectorAll('#donutLegend li').length,
+      top: document.getElementById('topCustomers').textContent,
+    }));
+    assert(kpis.customers === '1' && kpis.messages >= 9 && kpis.process === '1' && kpis.partners === '1',
+      'dashboard KPI đúng số liệu (khách=1, tin≥9, nhật ký=1, partner=1)', JSON.stringify(kpis));
+    assert(kpis.bars === 7, 'biểu đồ cột có đúng 7 ngày', `bars=${kpis.bars}`);
+    assert(kpis.legend >= 1 && kpis.top.includes('Khách hàng Test'),
+      'biểu đồ tròn hoạt động + top khách hàng hiển thị', `legend=${kpis.legend}, top="${kpis.top}"`);
+    await A.screenshot({ path: SHOT('10-admin-dashboard.png') });
+    await A.click('#statsCloseBtn');
+    await A.waitForSelector('#statsOverlay', { state: 'hidden', timeout: 4000 });
+    ok('đóng dashboard bằng nút ×');
 
     // 🔍 probe: partner cố vào /admin → pageGuard đá về login
     await P.goto(BASE + '/admin');

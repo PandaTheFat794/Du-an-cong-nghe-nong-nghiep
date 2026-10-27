@@ -18,7 +18,10 @@ const uploadLimiter = createRateLimiter({
 const UPLOAD_DIR = path.join(__dirname, '..', 'public', 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.doc', '.docx']);
+const ALLOWED_EXTENSIONS = new Set([
+  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.doc', '.docx',
+  '.webm', '.ogg', '.oga', '.mp3', '.wav', '.m4a',
+]);
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
 const storage = multer.diskStorage({
@@ -44,6 +47,13 @@ function hasValidSignature(buf, ext) {
     case '.pdf': return starts(0, [0x25, 0x50, 0x44, 0x46]);
     case '.doc': return starts(0, [0xd0, 0xcf, 0x11, 0xe0]);
     case '.docx': return starts(0, [0x50, 0x4b, 0x03, 0x04]);
+    // Audio: chấp nhận các container phổ biến của MediaRecorder (webm/ogg) + file âm thanh thường
+    case '.webm': return starts(0, [0x1a, 0x45, 0xdf, 0xa3]);
+    case '.ogg':
+    case '.oga': return starts(0, [0x4f, 0x67, 0x67, 0x53]); // "OggS"
+    case '.wav': return starts(0, [0x52, 0x49, 0x46, 0x46]) && buf.subarray(8, 12).toString('ascii') === 'WAVE';
+    case '.m4a': return buf.subarray(4, 8).toString('ascii') === 'ftyp';
+    case '.mp3': return starts(0, [0x49, 0x44, 0x33]) || (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0);
     default: return false;
   }
 }
@@ -64,7 +74,7 @@ router.post('/upload', requireAuth, uploadLimiter, (req, res) => {
     const ext = path.extname(req.file.originalname).toLowerCase();
     if (!ALLOWED_EXTENSIONS.has(ext)) {
       fs.unlink(req.file.path, () => {});
-      return res.status(400).json({ error: 'Chỉ chấp nhận ảnh (jpg/png/gif/webp) hoặc tài liệu (pdf/doc/docx)' });
+      return res.status(400).json({ error: 'Chỉ chấp nhận ảnh, tài liệu hoặc tệp âm thanh (webm/ogg/mp3/wav/m4a)' });
     }
 
     let header = Buffer.alloc(12);

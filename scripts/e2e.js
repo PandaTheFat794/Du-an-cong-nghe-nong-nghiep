@@ -221,6 +221,35 @@ async function main() {
   });
   check('🔍 nhật ký đính kèm path traversal → 400', r.status === 400, `status ${r.status}`);
 
+  // ===== 2c. Security headers + thống kê admin =====
+  const hResp = await fetch(BASE + '/api/me');
+  check('🔍 security headers: nosniff + SAMEORIGIN + referrer-policy',
+    hResp.headers.get('x-content-type-options') === 'nosniff'
+      && hResp.headers.get('x-frame-options') === 'SAMEORIGIN'
+      && hResp.headers.get('referrer-policy') === 'same-origin',
+    JSON.stringify({
+      nosniff: hResp.headers.get('x-content-type-options'),
+      frame: hResp.headers.get('x-frame-options'),
+      referrer: hResp.headers.get('referrer-policy'),
+    }));
+
+  r = await httpJson('/api/admin/stats');
+  check('GET /api/admin/stats khi chưa login → 401', r.status === 401, `status ${r.status}`);
+  r = await httpJson('/api/admin/stats', { cookie: user.cookie });
+  check('user gọi /api/admin/stats → 403', r.status === 403, `status ${r.status}`);
+  r = await httpJson('/api/admin/stats', { cookie: admin.cookie });
+  check('admin lấy thống kê → 200 + KPI + chuỗi 7 ngày + phân bố hoạt động',
+    r.status === 200 && r.data.success
+      && typeof r.data.totals.customers === 'number' && r.data.totals.customers >= 1
+      && typeof r.data.totals.partners === 'number' && r.data.totals.partners >= 1
+      && typeof r.data.totals.messages === 'number'
+      && typeof r.data.totals.processEntries === 'number' && r.data.totals.processEntries >= 1
+      && Array.isArray(r.data.messagesByDay) && r.data.messagesByDay.length === 7
+      && r.data.messagesByDay.every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date) && typeof d.count === 'number')
+      && Array.isArray(r.data.processByActivity)
+      && Array.isArray(r.data.topCustomers),
+    JSON.stringify(r.data && r.data.totals));
+
   // ===== 3. Socket realtime + phân quyền =====
   const userSock = connectSocket(user.sessionId);
   const adminSock = connectSocket(admin.sessionId);
@@ -327,6 +356,33 @@ async function main() {
       JSON.stringify({ count: page2.length, hasMore: r.data.has_more }));
     r = await httpJson(`/api/conversations/${convId}/messages?limit=abc`, { cookie: user.cookie });
     check('🔍 phân trang: limit không hợp lệ → dùng mặc định (200)', r.status === 200 && r.data.messages.length === 4, `status ${r.status}, count ${r.data.messages && r.data.messages.length}`);
+
+    // 🔍 attachment url giả mạo bên ngoài /uploads/ → strip (chống tracking pixel / leak IP của admin)
+    const fakeAttP = waitEvent(userSock, 'message', (m) => m.content === 'Theo dõi xem admin có mở không');
+    userSock.emit('message', {
+      convId,
+      content: 'Theo dõi xem admin có mở không',
+      attachment: { url: 'https://evil.example.com/track.png', name: 'track.png' },
+    });
+    const fakeAtt = await fakeAttP;
+    check('🔍 attachment url ngoài /uploads/ → bị strip, không lưu (chống tracking)',
+      fakeAtt.attachmentUrl === null && fakeAtt.attachmentName === null,
+      JSON.stringify({ url: fakeAtt.attachmentUrl, name: fakeAtt.attachmentName }));
+
+    const travP = waitEvent(userSock, 'message', (m) => m.content === 'Path traversal');
+    userSock.emit('message', {
+      convId,
+      content: 'Path traversal',
+      attachment: { url: '/uploads/../../etc/passwd', name: 'passwd.png' },
+    });
+    const trav = await travP;
+    check('🔍 attachment path traversal → bị strip', trav.attachmentUrl === null && trav.attachmentName === null,
+      JSON.stringify({ url: trav.attachmentUrl, name: trav.attachmentName }));
+
+    const longP = waitEvent(userSock, 'message', (m) => m.content && m.content.length > 1000);
+    userSock.emit('message', { convId, content: 'L'.repeat(5000) });
+    const longMsg = await longP;
+    check('🔍 tin quá dài → cắt còn 4000 ký tự', longMsg.content.length === 4000, `length=${longMsg.content.length}`);
   } finally {
     userSock.close();
     adminSock.close();
@@ -355,6 +411,30 @@ async function main() {
     check('tin nhắn kèm attachment broadcast đúng', msg.attachmentName === 'anh.png', JSON.stringify(msg));
     uSock2.close();
   }
+
+  // Tin nhắn thoại (.webm do MediaRecorder tạo): chấp nhận + broadcast không cần nội dung chữ
+  r = await httpJson('/api/upload', { method: 'POST', formData: (() => {
+    const fd = new FormData();
+    fd.append('file', new Blob([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81])], { type: 'audio/webm' }), 'ghi-am.webm');
+    return fd;
+  })(), cookie: user.cookie });
+  check('upload ghi âm .webm → 201 + url', r.status === 201 && /^\/uploads\/.*\.webm$/.test(r.data.url || ''), JSON.stringify(r.data));
+  if (r.status === 201) {
+    const aSock = connectSocket(user.sessionId);
+    aSock.emit('join', { convId });
+    await waitEvent(aSock, 'joined', (d) => d.convId === convId);
+    const gotAudio = waitEvent(aSock, 'message', (m) => m.attachmentName === 'ghi-am.webm');
+    aSock.emit('message', { convId, content: '', attachment: { url: r.data.url, name: 'ghi-am.webm' } });
+    const audioMsg = await gotAudio;
+    check('tin nhắn thoại broadcast kèm attachment (không cần chữ)', audioMsg.attachmentUrl === r.data.url, JSON.stringify(audioMsg));
+    aSock.close();
+  }
+  r = await httpJson('/api/upload', { method: 'POST', formData: (() => {
+    const fd = new FormData();
+    fd.append('file', new Blob([Buffer.from('khong phai webm')], { type: 'audio/webm' }), 'fake.webm');
+    return fd;
+  })(), cookie: user.cookie });
+  check('🔍 upload .webm giả mạo magic bytes → 400', r.status === 400, `status ${r.status}`);
 
   r = await httpJson('/api/process', {
     method: 'POST',

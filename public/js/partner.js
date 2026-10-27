@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let pendingFile = null;
   let processTimer = null;
   let socket = null;
+  let voice = null; // bộ ghi âm tin nhắn thoại
   const convOwners = new Map(); // convId → { userId, view } để định tuyến tin nhắn/số đếm
 
   const pager = createHistoryPager(
@@ -84,11 +85,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     activeConvId = convId;
     const tab = tabFor(view);
     if (tab) tab.classList.remove('has-new');
+    unreadTitle.clear(`conv:${convId}`);
     msgInput.placeholder = view === 'customer'
       ? `Nhắn riêng cho ${selectedCustomer.user_name}...`
       : 'Nhắn riêng cho admin...';
     typingView.hide();
     pendingSends.clear();
+    voice?.cancel();
     if (socket) socket.emit('join', { convId });
     await pager.open(convId);
     if (activeConvId === convId) scrollBottom();
@@ -97,6 +100,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function setView(view) {
     const next = view === 'customer' || view === 'admin' ? view : 'process';
     if (next !== 'process' && !selectedCustomer) return;
+    voice?.cancel();
     activeView = next;
     for (const btn of tabButtons) {
       const active = btn.dataset.view === activeView;
@@ -143,6 +147,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     activeConvId = null;
     typingView.hide();
     pendingSends.clear();
+    voice?.cancel();
     processTimeline.dataset.ready = '';
 
     // Join cả 2 phòng riêng để nhận tin realtime kể cả khi đang xem tab khác
@@ -212,8 +217,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       scrollBottom();
       return;
     }
-    // Tin đến luồng còn lại của khách đang mở → chấm đỏ + toast, không xen vào khung chat
-    if (!owner || !selectedCustomer || owner.userId !== selectedCustomer.user_id) return;
+    // Tin đến luồng khác → đếm lên title tab + chấm đỏ/toast nếu là khách đang mở
+    if (!owner) return;
+    if (msg.senderId !== myUser.id) {
+      unreadTitle.bump(`conv:${msg.convId}`);
+      playPing();
+    }
+    if (!selectedCustomer || owner.userId !== selectedCustomer.user_id) return;
     markTabNew(owner.view);
     if (msg.senderId !== myUser.id) toast(`Tin nhắn mới từ ${msg.senderName}`, 'info');
   });
@@ -286,5 +296,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   msgInput.addEventListener('input', typing.onInput);
   msgInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendMessage();
+  });
+
+  // Ghi âm: dừng là tự gửi vào đúng luồng đã bắt đầu ghi
+  voice = wireVoiceRecorder({
+    buttonId: 'voiceBtn',
+    chipId: 'attachChip',
+    canStart: () => activeView !== 'process' && !!activeConvId && !pendingFile,
+    getConvId: () => activeConvId,
+    onRecorded: (res, convId) => {
+      if (convId !== activeConvId) {
+        toast('Đã chuyển cuộc trò chuyện, bản ghi âm không được gửi.', 'info');
+        return;
+      }
+      pendingFile = res;
+      attachChip.textContent = `Đang đính kèm: ${res.name}`;
+      sendMessage();
+    },
   });
 });

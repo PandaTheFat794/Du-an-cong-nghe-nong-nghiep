@@ -189,6 +189,11 @@ function processEntryEl(entry, opts = {}) {
       img.src = entry.attachmentUrl;
       img.alt = entry.attachmentName || 'Ảnh nhật ký canh tác';
       img.loading = 'lazy';
+      img.title = 'Bấm để xem ảnh to';
+      img.addEventListener('click', (e) => {
+        e.preventDefault(); // xem tại chỗ bằng lightbox; giữ link cho mở tab mới
+        openLightbox(entry.attachmentUrl, entry.attachmentName);
+      });
       link.appendChild(img);
       media.appendChild(link);
       card.appendChild(media);
@@ -300,6 +305,29 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
           <button class="chat-btn" id="processCancelBtn" type="button">Hủy</button>
         </div>
       </form>
+      <div class="process-filters" id="processFilters" hidden>
+        <div class="process-filter-row">
+          <label class="process-filter-field">
+            <span>Hoạt động</span>
+            <select id="processFilterActivity">
+              <option value="">Tất cả hoạt động</option>
+            </select>
+          </label>
+          <label class="process-filter-field">
+            <span>Từ ngày</span>
+            <input id="processFilterFrom" type="date">
+          </label>
+          <label class="process-filter-field">
+            <span>Đến ngày</span>
+            <input id="processFilterTo" type="date">
+          </label>
+        </div>
+        <div class="process-filter-actions">
+          <button class="chat-btn" id="processFilterReset" type="button">Xóa lọc</button>
+          <button class="chat-btn process-export-btn" id="processExportBtn" type="button" disabled>Xuất CSV</button>
+          <span class="process-filter-note" id="processFilterNote"></span>
+        </div>
+      </div>
       <div class="process-drawer-body">
         <div class="process-timeline" id="processTimeline"></div>
       </div>
@@ -321,16 +349,30 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
   const cancelBtn = overlay.querySelector('#processCancelBtn');
   const submitBtn = overlay.querySelector('#processSubmitBtn');
   const attachChip = overlay.querySelector('#processAttachChip');
+  const filtersEl = overlay.querySelector('#processFilters');
+  const filterActivity = overlay.querySelector('#processFilterActivity');
+  const filterFrom = overlay.querySelector('#processFilterFrom');
+  const filterTo = overlay.querySelector('#processFilterTo');
+  const filterReset = overlay.querySelector('#processFilterReset');
+  const filterNote = overlay.querySelector('#processFilterNote');
+  const exportBtn = overlay.querySelector('#processExportBtn');
 
   for (const activity of PROCESS_ACTIVITIES) {
     const option = document.createElement('option');
     option.value = activity.key;
     option.textContent = activity.label;
     activitySelect.appendChild(option);
+
+    const filterOption = document.createElement('option');
+    filterOption.value = activity.key;
+    filterOption.textContent = activity.label;
+    filterActivity.appendChild(filterOption);
   }
 
   let userId = null;
   let pendingAttachment = null;
+  let allEntries = [];
+  let currentName = '';
 
   if (canAdd) {
     toolbar.hidden = false;
@@ -356,10 +398,111 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
     document.body.classList.remove('drawer-open');
   }
 
+  function clearFilterInputs() {
+    filterActivity.value = '';
+    filterFrom.value = '';
+    filterTo.value = '';
+    filterNote.textContent = '';
+    exportBtn.disabled = true;
+  }
+
+  function filteredEntries() {
+    return allEntries.filter((entry) => {
+      if (filterActivity.value && entry.activity !== filterActivity.value) return false;
+      if (filterFrom.value && (entry.performedAt || '') < filterFrom.value) return false;
+      if (filterTo.value && (entry.performedAt || '') > filterTo.value) return false;
+      return true;
+    });
+  }
+
+  function renderFiltered() {
+    const activeFilter = filterActivity.value || filterFrom.value || filterTo.value;
+    const entries = filteredEntries();
+    filtersEl.hidden = !allEntries.length;
+    filterNote.textContent = activeFilter ? `Hiển thị ${entries.length}/${allEntries.length} mục` : '';
+    exportBtn.disabled = !entries.length;
+    exportBtn.title = entries.length
+      ? `Xuất ${entries.length} mục nhật ký ra CSV`
+      : 'Không có mục để xuất';
+
+    if (allEntries.length && !entries.length) {
+      timelineEl.innerHTML = '';
+      const empty = processEmptyEl();
+      empty.classList.add('process-empty-filtered');
+      const heading = empty.querySelector('h3');
+      const desc = empty.querySelector('p');
+      if (heading) heading.textContent = 'Không có mục nào khớp bộ lọc';
+      if (desc) desc.textContent = 'Thử chọn hoạt động khác hoặc xóa khoảng ngày để xem toàn bộ nhật ký.';
+      timelineEl.appendChild(empty);
+      return;
+    }
+
+    renderProcessTimeline(timelineEl, entries, {
+      canDelete: true,
+      onDelete: deleteEntry,
+    });
+  }
+
+  function resetFilters() {
+    clearFilterInputs();
+    renderFiltered();
+  }
+
+  function csvCell(value) {
+    let text = value == null ? '' : String(value);
+    // Chặn CSV formula injection khi mở file bằng Excel
+    if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  function slugify(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase();
+  }
+
+  function exportCsv() {
+    const entries = filteredEntries();
+    if (!entries.length) return;
+
+    const rows = [['Hoạt động', 'Ngày thực hiện', 'Tiêu đề', 'Phương pháp', 'Chi tiết', 'Tệp đính kèm']];
+    for (const entry of entries) {
+      rows.push([
+        processActivityMeta(entry.activity).label,
+        entry.performedAt || '',
+        entry.title || '',
+        entry.method || '',
+        entry.details || '',
+        entry.attachmentUrl ? new URL(entry.attachmentUrl, location.origin).href : '',
+      ]);
+    }
+    const csv = rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
+    // BOM để Excel nhận đúng UTF-8 (tiếng Việt có dấu)
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `nhat-ky-${slugify(currentName) || 'khach'}-${todayIsoDate()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`Đã xuất ${entries.length} mục nhật ký ra CSV.`, 'success');
+  }
+
   async function refresh() {
     if (!userId) return;
     const { data } = await api(`/process?userId=${userId}`);
     if (!data || !data.success) {
+      allEntries = [];
+      filtersEl.hidden = true;
+      filterNote.textContent = '';
+      exportBtn.disabled = true;
       timelineEl.innerHTML = '';
       const err = document.createElement('div');
       err.className = 'process-empty';
@@ -369,10 +512,8 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
       timelineEl.appendChild(err);
       return;
     }
-    renderProcessTimeline(timelineEl, data.entries, {
-      canDelete: true,
-      onDelete: deleteEntry,
-    });
+    allEntries = data.entries || [];
+    renderFiltered();
   }
 
   async function deleteEntry(entry) {
@@ -389,6 +530,10 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
 
   async function open(targetUserId, displayName) {
     userId = targetUserId;
+    currentName = displayName || '';
+    allEntries = [];
+    clearFilterInputs();
+    filtersEl.hidden = true;
     titleEl.textContent = displayName ? `Nhật ký của ${displayName}` : 'Nhật ký canh tác';
     if (canAdd) {
       resetForm();
@@ -417,6 +562,13 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
     addToggle.hidden = false;
   });
 
+  for (const el of [filterActivity, filterFrom, filterTo]) {
+    el.addEventListener('input', renderFiltered);
+    el.addEventListener('change', renderFiltered);
+  }
+  filterReset.addEventListener('click', resetFilters);
+  exportBtn.addEventListener('click', exportCsv);
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!userId) return;
@@ -441,6 +593,7 @@ function createProcessDrawer({ canAdd = false, onChanged = null } = {}) {
       resetForm();
       form.hidden = true;
       addToggle.hidden = false;
+      clearFilterInputs();
       await refresh();
       if (onChanged) onChanged();
     } else {

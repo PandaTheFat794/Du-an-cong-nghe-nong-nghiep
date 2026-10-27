@@ -64,6 +64,47 @@ router.get('/users', requireAuth, requireRole('admin'), (req, res) => {
 });
 
 /**
+ * GET /api/admin/stats
+ * Tổng hợp cho dashboard admin: KPI tổng, tin nhắn 7 ngày gần nhất,
+ * nhật ký theo hoạt động, top khách hàng nhắn nhiều nhất.
+ */
+router.get('/stats', requireAuth, requireRole('admin'), (req, res) => {
+  const totals = {
+    customers: db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'user'").get().c,
+    partners: db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'partner'").get().c,
+    messages: db.prepare('SELECT COUNT(*) AS c FROM messages').get().c,
+    processEntries: db.prepare('SELECT COUNT(*) AS c FROM process_entries').get().c,
+  };
+
+  const byDayMap = new Map(
+    db.prepare(
+      "SELECT date(created_at, 'localtime') AS day, COUNT(*) AS cnt FROM messages GROUP BY day"
+    ).all().map((r) => [r.day, r.cnt])
+  );
+  const pad = (n) => String(n).padStart(2, '0');
+  const messagesByDay = [];
+  for (let i = 6; i >= 0; i -= 1) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    messagesByDay.push({ date: key, count: byDayMap.get(key) || 0 });
+  }
+
+  const processByActivity = db.prepare(
+    'SELECT activity, COUNT(*) AS count FROM process_entries GROUP BY activity ORDER BY count DESC'
+  ).all();
+
+  const topCustomers = db.prepare(
+    `SELECT u.id, u.display_name, COUNT(m.id) AS message_count
+     FROM users u JOIN messages m ON m.sender_id = u.id
+     WHERE u.role = 'user'
+     GROUP BY u.id ORDER BY message_count DESC, u.id ASC LIMIT 5`
+  ).all();
+
+  res.json({ success: true, totals, messagesByDay, processByActivity, topCustomers });
+});
+
+/**
  * GET /api/admin/partners
  * Danh sách tài khoản partner để admin chọn gán cho khách.
  */

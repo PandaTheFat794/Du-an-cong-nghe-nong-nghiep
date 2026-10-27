@@ -22,6 +22,28 @@
         </h1>
         <span class="user-name" id="adminName"></span>
       </div>
+      <div class="admin-overview" aria-label="Tổng quan nhanh">
+        <div class="admin-stat">
+          <span class="admin-stat-value" id="statCustomers">0</span>
+          <span class="admin-stat-label">Khách hàng</span>
+        </div>
+        <div class="admin-stat stat-unread">
+          <span class="admin-stat-value" id="statUnread">0</span>
+          <span class="admin-stat-label">Tin khách chưa đọc</span>
+        </div>
+        <div class="admin-stat stat-partner">
+          <span class="admin-stat-value" id="statPartnerUnread">0</span>
+          <span class="admin-stat-label">Tin partner chưa đọc</span>
+        </div>
+        <div class="admin-stat">
+          <span class="admin-stat-value" id="statProcess">0</span>
+          <span class="admin-stat-label">Mục nhật ký</span>
+        </div>
+      </div>
+      <div class="admin-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input type="search" id="adminSearch" placeholder="Tìm khách hàng theo tên..." autocomplete="off">
+      </div>
       <div class="user-list" id="adminUserList"></div>
     </div>
 
@@ -36,6 +58,7 @@
           <select class="partner-select" id="partnerSelect" hidden aria-label="Chọn Partner"></select>
           <button class="chat-btn" id="connectPartnerBtn" hidden type="button">Kết nối Partner</button>
           <button class="chat-btn" id="processBtn" type="button" hidden>Nhật ký</button>
+          <button class="chat-btn" id="statsBtn" type="button" title="Thống kê hệ thống">Thống kê</button>
           <button class="chat-btn" id="logoutBtn" type="button">Đăng xuất</button>
         </div>
       </div>
@@ -48,11 +71,58 @@
         <button class="attach-btn" id="attachBtn" type="button" title="Gửi ảnh / tài liệu" aria-label="Gửi ảnh hoặc tài liệu" disabled>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
         </button>
+        <button class="attach-btn voice-btn" id="voiceBtn" type="button" title="Ghi âm tin nhắn" aria-label="Ghi âm tin nhắn" aria-pressed="false" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+        </button>
         <input type="file" id="attachInput" hidden accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx">
         <input class="input-field" id="msgInput" type="text" placeholder="Nhập tin nhắn..." autocomplete="off" disabled>
         <button class="input-btn" id="sendBtn" disabled>Gửi
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
         </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats-overlay" id="statsOverlay" hidden>
+    <div class="stats-modal" role="dialog" aria-modal="true" aria-labelledby="statsTitle">
+      <div class="stats-head">
+        <h2 id="statsTitle">Thống kê hệ thống</h2>
+        <button class="stats-close" id="statsCloseBtn" type="button" aria-label="Đóng thống kê">×</button>
+      </div>
+      <div class="stats-kpis">
+        <div class="kpi kpi-green">
+          <span class="kpi-value" id="kpiCustomers">–</span>
+          <span class="kpi-label">Khách hàng</span>
+        </div>
+        <div class="kpi kpi-blue">
+          <span class="kpi-value" id="kpiMessages">–</span>
+          <span class="kpi-label">Tin nhắn</span>
+        </div>
+        <div class="kpi kpi-amber">
+          <span class="kpi-value" id="kpiProcess">–</span>
+          <span class="kpi-label">Mục nhật ký</span>
+        </div>
+        <div class="kpi kpi-purple">
+          <span class="kpi-value" id="kpiPartners">–</span>
+          <span class="kpi-label">Partner</span>
+        </div>
+      </div>
+      <div class="stats-card">
+        <h3>Tin nhắn 7 ngày gần nhất</h3>
+        <div class="bar-chart" id="barChart" aria-label="Biểu đồ tin nhắn theo ngày"></div>
+      </div>
+      <div class="stats-row">
+        <div class="stats-card">
+          <h3>Hoạt động nhật ký</h3>
+          <div class="donut-wrap">
+            <div class="donut" id="donutChart"></div>
+            <ul class="donut-legend" id="donutLegend"></ul>
+          </div>
+        </div>
+        <div class="stats-card">
+          <h3>Khách hàng nhắn nhiều nhất</h3>
+          <ol class="top-customers" id="topCustomers"></ol>
+        </div>
       </div>
     </div>
   </div>

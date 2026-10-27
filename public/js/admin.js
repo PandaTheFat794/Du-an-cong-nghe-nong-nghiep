@@ -13,10 +13,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const msgInput = document.getElementById('msgInput');
   const sendBtn = document.getElementById('sendBtn');
   const attachBtn = document.getElementById('attachBtn');
+  const voiceBtn = document.getElementById('voiceBtn');
   const chatTitle = document.getElementById('chatTitle');
   const partnerSelect = document.getElementById('partnerSelect');
   const connectPartnerBtn = document.getElementById('connectPartnerBtn');
   const processBtn = document.getElementById('processBtn');
+  const statsBtn = document.getElementById('statsBtn');
   const threadTabs = document.getElementById('threadTabs');
   const partnerThreadTab = document.getElementById('partnerThreadTab');
   const tabButtons = [...threadTabs.querySelectorAll('.view-tab')];
@@ -38,6 +40,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let activeConvId = null;
   let partners = [];
   let pendingFile = null;
+  let voice = null; // bộ ghi âm tin nhắn thoại
   let usersReloadTimer = null;
   let processReloadTimer = null;
 
@@ -46,29 +49,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // ===== Sidebar =====
-  async function loadUsers() {
-    const list = document.getElementById('adminUserList');
-    const prevScroll = list.scrollTop;
-    const { data } = await api('/admin/users');
-    if (!data || !data.success) return;
+  const userListEl = document.getElementById('adminUserList');
+  const searchInput = document.getElementById('adminSearch');
+  let latestUsers = [];
+  let searchQuery = '';
 
-    if (selectedUser) {
-      const fresh = data.users.find((u) => u.id === selectedUser.id);
-      if (!fresh) {
-        resetChatArea();
-      } else {
-        Object.assign(selectedUser, fresh);
-      }
-    }
+  function renderOverview(users) {
+    document.getElementById('statCustomers').textContent = users.length;
+    document.getElementById('statUnread').textContent = users.reduce((sum, u) => sum + (u.unread_count || 0), 0);
+    document.getElementById('statPartnerUnread').textContent = users.reduce((sum, u) => sum + (u.partner_unread || 0), 0);
+    document.getElementById('statProcess').textContent = users.reduce((sum, u) => sum + (u.process_count || 0), 0);
+    // Đồng bộ tổng tin chưa đọc lên title tab
+    unreadTitle.setAll(
+      users.reduce((sum, u) => sum + (u.unread_count || 0) + (u.partner_unread || 0), 0)
+    );
+  }
+
+  function renderUserList() {
+    const list = userListEl;
+    const prevScroll = list.scrollTop;
+    const q = searchQuery.trim().toLowerCase();
+    const users = q
+      ? latestUsers.filter((u) => String(u.display_name || '').toLowerCase().includes(q)
+        || String(u.username || '').toLowerCase().includes(q))
+      : latestUsers;
 
     list.innerHTML = '';
-    if (!data.users.length) {
+    if (!users.length) {
       const empty = document.createElement('div');
       empty.className = 'no-partner';
-      empty.textContent = 'Chưa có khách hàng nào';
+      empty.textContent = latestUsers.length ? 'Không tìm thấy khách hàng phù hợp' : 'Chưa có khách hàng nào';
       list.appendChild(empty);
     }
-    for (const u of data.users) {
+    for (const u of users) {
       const item = document.createElement('div');
       item.className = 'user-item' + (selectedUser && u.id === selectedUser.id ? ' active' : '');
       item.dataset.convId = u.conversation_id;
@@ -115,7 +128,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       del.textContent = 'Xóa';
       del.addEventListener('click', (e) => {
         e.stopPropagation();
-        deleteUser(u, item);
+        deleteUser(u);
       });
       actions.append(badge, partnerBadge, del);
 
@@ -127,11 +140,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (selectedUser) updateThreadTabs();
   }
 
-  async function deleteUser(u, itemEl) {
+  searchInput.addEventListener('input', () => {
+    searchQuery = searchInput.value;
+    renderUserList();
+  });
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      searchInput.value = '';
+      searchQuery = '';
+      renderUserList();
+    }
+  });
+
+  async function loadUsers() {
+    const { data } = await api('/admin/users');
+    if (!data || !data.success) return;
+
+    if (selectedUser) {
+      const fresh = data.users.find((u) => u.id === selectedUser.id);
+      if (!fresh) {
+        resetChatArea();
+      } else {
+        Object.assign(selectedUser, fresh);
+      }
+    }
+
+    latestUsers = data.users;
+    renderOverview(latestUsers);
+    renderUserList();
+  }
+
+  async function deleteUser(u) {
     if (!confirm(`Xóa tài khoản "${u.display_name}" (${u.username})? Toàn bộ lịch sử chat sẽ mất.`)) return;
     const { data } = await api(`/admin/users/${u.id}`, { method: 'DELETE' });
     if (data && data.success) {
-      itemEl.remove();
+      latestUsers = latestUsers.filter((x) => x.id !== u.id);
+      renderOverview(latestUsers);
+      renderUserList();
       if (selectedUser && selectedUser.id === u.id) resetChatArea();
       if (processDrawer.isOpenFor(u.id)) processDrawer.close();
       toast(`Đã xóa tài khoản ${u.display_name}`, 'success');
@@ -146,9 +191,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     activeConvId = null;
     typingView.hide();
     pendingSends.clear();
+    voice?.cancel();
     pager.reset();
     chatTitle.textContent = 'Chọn một khách hàng để tư vấn';
-    [msgInput, sendBtn, attachBtn].forEach((el) => { el.disabled = true; });
+    [msgInput, sendBtn, attachBtn, voiceBtn].forEach((el) => { el.disabled = true; });
     partnerSelect.hidden = true;
     connectPartnerBtn.hidden = true;
     processBtn.hidden = true;
@@ -213,6 +259,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       : `Nhắn cho ${selectedUser.display_name}...`;
     typingView.hide();
     pendingSends.clear();
+    voice?.cancel();
 
     socket.emit('join', { convId });
     const data = await pager.open(convId);
@@ -238,7 +285,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll('.user-item').forEach((el) => {
       el.classList.toggle('active', Number(el.dataset.userId) === u.id);
     });
-    [msgInput, sendBtn, attachBtn].forEach((el) => { el.disabled = false; });
+    [msgInput, sendBtn, attachBtn, voiceBtn].forEach((el) => { el.disabled = false; });
     partnerSelect.hidden = false;
     connectPartnerBtn.hidden = false;
     processBtn.hidden = false;
@@ -297,6 +344,140 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // ===== Thống kê hệ thống =====
+  const statsOverlay = document.getElementById('statsOverlay');
+  const statsCloseBtn = document.getElementById('statsCloseBtn');
+  const ACTIVITY_META = {
+    sowing: { label: 'Gieo hạt', color: '#16a34a' },
+    fertilizing: { label: 'Bón phân', color: '#b45309' },
+    watering: { label: 'Tưới nước', color: '#0284c7' },
+    pesticide: { label: 'Phun thuốc', color: '#7c3aed' },
+    pruning: { label: 'Tỉa cành', color: '#db2777' },
+    harvest: { label: 'Thu hoạch', color: '#ca8a04' },
+    other: { label: 'Khác', color: '#64748b' },
+  };
+
+  function closeStats() {
+    statsOverlay.hidden = true;
+  }
+
+  function renderBarChart(container, days) {
+    container.innerHTML = '';
+    const max = Math.max(1, ...days.map((d) => d.count));
+    for (const d of days) {
+      const col = document.createElement('div');
+      col.className = 'bar-col';
+
+      const num = document.createElement('div');
+      num.className = 'bar-num';
+      num.textContent = d.count;
+
+      const track = document.createElement('div');
+      track.className = 'bar-track';
+      const fill = document.createElement('div');
+      fill.className = 'bar-fill';
+      fill.style.height = `${Math.round((d.count / max) * 100)}%`;
+      fill.title = `${d.date}: ${d.count} tin nhắn`;
+      track.appendChild(fill);
+
+      const day = document.createElement('div');
+      day.className = 'bar-day';
+      day.textContent = d.date.slice(5); // MM-DD
+
+      col.append(num, track, day);
+      container.appendChild(col);
+    }
+  }
+
+  function renderDonut(activities) {
+    const donut = document.getElementById('donutChart');
+    const legend = document.getElementById('donutLegend');
+    const total = activities.reduce((s, a) => s + a.count, 0);
+    legend.innerHTML = '';
+    if (!total) {
+      donut.style.setProperty('--donut-grad', '#e2e8f0 0 100%');
+      donut.dataset.total = '0';
+      const li = document.createElement('li');
+      li.textContent = 'Chưa có mục nhật ký nào';
+      legend.appendChild(li);
+      return;
+    }
+    donut.dataset.total = total;
+    let cursor = 0;
+    const segments = activities.map((a) => {
+      const meta = ACTIVITY_META[a.activity] || ACTIVITY_META.other;
+      const start = cursor;
+      cursor += (a.count / total) * 100;
+      return { meta, start, end: cursor, count: a.count };
+    });
+    donut.style.setProperty(
+      '--donut-grad',
+      segments.map((s) => `${s.meta.color} ${s.start}% ${s.end}%`).join(', ')
+    );
+    for (const s of segments) {
+      const li = document.createElement('li');
+      const dot = document.createElement('span');
+      dot.className = 'legend-dot';
+      dot.style.background = s.meta.color;
+      const name = document.createElement('span');
+      name.textContent = s.meta.label;
+      const n = document.createElement('span');
+      n.className = 'legend-num';
+      n.textContent = s.count;
+      li.append(dot, name, n);
+      legend.appendChild(li);
+    }
+  }
+
+  function renderTopCustomers(container, rows) {
+    container.innerHTML = '';
+    if (!rows.length) {
+      const empty = document.createElement('li');
+      empty.className = 'top-empty';
+      empty.textContent = 'Chưa có khách hàng nhắn tin';
+      container.appendChild(empty);
+      return;
+    }
+    rows.forEach((r, i) => {
+      const li = document.createElement('li');
+      const rank = document.createElement('span');
+      rank.className = 'top-rank';
+      rank.textContent = i + 1;
+      const name = document.createElement('span');
+      name.className = 'top-name';
+      name.textContent = r.display_name;
+      name.title = r.display_name;
+      const count = document.createElement('span');
+      count.className = 'top-count';
+      count.textContent = `${r.message_count} tin`;
+      li.append(rank, name, count);
+      container.appendChild(li);
+    });
+  }
+
+  statsBtn.addEventListener('click', async () => {
+    statsOverlay.hidden = false;
+    const { data } = await api('/admin/stats');
+    if (!data || !data.success) {
+      toast((data && data.error) || 'Không tải được thống kê', 'error');
+      return;
+    }
+    document.getElementById('kpiCustomers').textContent = data.totals.customers;
+    document.getElementById('kpiMessages').textContent = data.totals.messages;
+    document.getElementById('kpiProcess').textContent = data.totals.processEntries;
+    document.getElementById('kpiPartners').textContent = data.totals.partners;
+    renderBarChart(document.getElementById('barChart'), data.messagesByDay);
+    renderDonut(data.processByActivity);
+    renderTopCustomers(document.getElementById('topCustomers'), data.topCustomers);
+  });
+  statsCloseBtn.addEventListener('click', closeStats);
+  statsOverlay.addEventListener('click', (e) => {
+    if (e.target === statsOverlay) closeStats();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !statsOverlay.hidden) closeStats();
+  });
+
   // ===== Socket =====
   const socket = io({ path: '/ws', query: { sessionId: getSessionId() } });
   const typing = createTypingSender(socket, () => activeConvId);
@@ -333,13 +514,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     usersReloadTimer = setTimeout(loadUsers, 400);
   });
   socket.on('unread-badge', ({ convId, count }) => {
-    if (convId !== activeConvId) setUserBadge(convId, count);
+    const u = latestUsers.find((x) => x.conversation_id === convId);
+    if (u) {
+      u.unread_count = count;
+      renderOverview(latestUsers);
+    }
+    if (convId !== activeConvId) {
+      setUserBadge(convId, count);
+      playPing();
+    }
   });
-  socket.on('badge-cleared', ({ convId }) => setUserBadge(convId, 0));
+  socket.on('badge-cleared', ({ convId }) => {
+    const u = latestUsers.find((x) => x.conversation_id === convId);
+    if (u) {
+      u.unread_count = 0;
+      renderOverview(latestUsers);
+    }
+    setUserBadge(convId, 0);
+  });
   socket.on('partner-badge', ({ convId, userId, count }) => {
-    if (convId !== activeConvId) setPartnerBadge(userId, count);
+    const u = latestUsers.find((x) => x.id === userId);
+    if (u) {
+      u.partner_unread = count;
+      renderOverview(latestUsers);
+    }
+    if (convId !== activeConvId) {
+      setPartnerBadge(userId, count);
+      playPing();
+    }
   });
-  socket.on('partner-badge-cleared', ({ userId }) => setPartnerBadge(userId, 0));
+  socket.on('partner-badge-cleared', ({ userId }) => {
+    const u = latestUsers.find((x) => x.id === userId);
+    if (u) {
+      u.partner_unread = 0;
+      renderOverview(latestUsers);
+    }
+    setPartnerBadge(userId, 0);
+  });
   socket.on('process-updated', (d) => {
     if (selectedUser && d.convId === selectedUser.conversation_id) {
       if (processDrawer.isOpenFor(d.userId)) {
@@ -406,6 +617,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   msgInput.addEventListener('input', typing.onInput);
   msgInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendMessage();
+  });
+
+  // Ghi âm: dừng là tự gửi vào đúng thread đã bắt đầu ghi
+  voice = wireVoiceRecorder({
+    buttonId: 'voiceBtn',
+    chipId: 'attachChip',
+    canStart: () => !!activeConvId && !pendingFile,
+    getConvId: () => activeConvId,
+    onRecorded: (res, convId) => {
+      if (convId !== activeConvId) {
+        toast('Đã chuyển cuộc trò chuyện, bản ghi âm không được gửi.', 'info');
+        return;
+      }
+      pendingFile = res;
+      attachChip.textContent = `Đang đính kèm: ${res.name}`;
+      sendMessage();
+    },
   });
 
   await loadPartners();

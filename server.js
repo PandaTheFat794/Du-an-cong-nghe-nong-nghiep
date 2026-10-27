@@ -1,6 +1,7 @@
 require('dotenv').config({ quiet: true });
 const express = require('express');
 const http = require('http');
+const fs = require('fs');
 const path = require('path');
 const session = require('express-session');
 const { Server } = require('socket.io');
@@ -29,6 +30,14 @@ app.use(
     cookie: { maxAge: 24 * 60 * 60 * 1000, httpOnly: true }, // 1 ngày
   })
 );
+
+// === Security headers cơ bản (không cần helmet cho app mẫu) ===
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  next();
+});
 
 // === Socket.io (handshake mang ?sessionId= để định danh) ===
 const io = new Server(server, { path: '/ws' });
@@ -139,9 +148,22 @@ io.on('connection', (socket) => {
       return socket.emit('error', { message: 'Bạn gửi tin quá nhanh, vui lòng đợi vài giây.' });
     }
 
-    const text = (content || '').toString().trim();
-    const fileUrl = attachment && attachment.url ? attachment.url : null;
-    const fileName = attachment && attachment.name ? attachment.name : null;
+    const MAX_MESSAGE_LENGTH = 4000;
+    let text = (content || '').toString().trim();
+    if (text.length > MAX_MESSAGE_LENGTH) text = text.slice(0, MAX_MESSAGE_LENGTH);
+
+    let fileUrl = attachment && attachment.url ? String(attachment.url).replace(/\\/g, '/') : null;
+    let fileName = attachment && attachment.name ? String(attachment.name).slice(0, 160) : null;
+    // Chỉ chấp nhận file thật sự nằm trong public/uploads/ — client tự gửi url có thể giả mạo
+    if (fileUrl) {
+      const uploadsRoot = path.join(__dirname, 'public', 'uploads');
+      const abs = path.join(__dirname, 'public', fileUrl);
+      if (!fileUrl.startsWith('/uploads/') || fileUrl.includes('..')
+        || !abs.startsWith(uploadsRoot + path.sep) || !fs.existsSync(abs)) {
+        fileUrl = null;
+        fileName = null;
+      }
+    }
     if (!text && !fileUrl) {
       return socket.emit('error', { message: 'Tin nhắn trống.' });
     }

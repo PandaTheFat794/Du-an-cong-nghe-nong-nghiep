@@ -25,6 +25,29 @@ document.addEventListener('DOMContentLoaded', () => {
   tabLogin.addEventListener('click', () => switchTab(false));
   tabRegister.addEventListener('click', () => switchTab(true));
 
+  // Vào nhanh 1 trong 3 tài khoản seed (demo) — vẫn đi qua /api/login như form thường
+  const quickButtons = [...document.querySelectorAll('.quick-account')];
+  for (const btn of quickButtons) {
+    btn.addEventListener('click', async () => {
+      errorBox.hidden = true;
+      quickButtons.forEach((b) => { b.disabled = true; });
+      const { data } = await api('/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: btn.dataset.quickUser,
+          password: btn.dataset.quickPass,
+        }),
+      });
+      if (data && data.success) {
+        saveSession(data.sessionId);
+        window.location.href = homeFor(data.user.role);
+      } else {
+        quickButtons.forEach((b) => { b.disabled = false; });
+        showError((data && data.error) || 'Đăng nhập nhanh thất bại');
+      }
+    });
+  }
+
   loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const { data } = await api('/login', {

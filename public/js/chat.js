@@ -35,6 +35,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   let activeThread = null;
   let activeConvId = null;
+  let voice = null; // bộ ghi âm tin nhắn thoại
 
   // Nhật ký canh tác của chính khách hàng (drawer bên phải)
   const processDrawer = createProcessDrawer({ canAdd: true });
@@ -74,10 +75,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     activeConvId = thread.convId;
     updateTabState();
     tabsByThread.get(threadKey).classList.remove('has-new');
+    unreadTitle.clear(threadKey);
     chatTitle.textContent = thread.title;
     msgInput.placeholder = thread.placeholder;
     typingView.hide();
     pendingSends.clear();
+    voice?.cancel();
     pager.reset();
 
     socket.emit('join', { convId: thread.convId });
@@ -110,6 +113,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const threadKey = Object.keys(threads).find((key) => threads[key].convId === msg.convId);
       if (threadKey) {
         markThreadNew(threadKey);
+        unreadTitle.bump(threadKey);
+        playPing();
         toast(`Tin nhắn mới từ ${msg.senderName}`, 'info');
       }
       return;
@@ -183,6 +188,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   msgInput.addEventListener('input', typing.onInput);
   msgInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') sendMessage();
+  });
+
+  // Ghi âm: dừng là tự gửi vào đúng thread đã bắt đầu ghi
+  voice = wireVoiceRecorder({
+    buttonId: 'voiceBtn',
+    chipId: 'attachChip',
+    canStart: () => !!activeConvId && !pendingFile,
+    getConvId: () => activeConvId,
+    onRecorded: (res, convId) => {
+      if (convId !== activeConvId) {
+        toast('Đã chuyển cuộc trò chuyện, bản ghi âm không được gửi.', 'info');
+        return;
+      }
+      pendingFile = res;
+      attachChip.textContent = `Đang đính kèm: ${res.name}`;
+      sendMessage();
+    },
   });
 
   await openThread('admin');
