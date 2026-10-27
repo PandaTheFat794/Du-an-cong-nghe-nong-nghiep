@@ -233,6 +233,8 @@ async function headerOverflow(page) {
     assert(/2/.test(yieldTxt) && /6,5/.test(yieldTxt) && /13/.test(yieldTxt),
       'user nhập diện tích/năng suất → tự tính sản lượng 13 tấn + chip số liệu',
       yieldTxt.replace(/\n/g, ' · '));
+    assert(await U.locator('#processExportBtn').isVisible() && await U.locator('#processExcelBtn').isHidden(),
+      '🔍 khách hàng chỉ thấy Xuất CSV, không có Xuất Excel');
 
     await U.waitForTimeout(450); // chờ animation stagger của timeline kết thúc
     await U.screenshot({ path: SHOT('04-user-nhat-ky.png') });

@@ -195,6 +195,10 @@ router.get('/export', requireAuth, async (req, res) => {
   if (!canViewProcess(req.user, targetId)) {
     return res.status(403).json({ error: 'Bạn không có quyền xem nhật ký canh tác này' });
   }
+  // Khách hàng chỉ xuất CSV (client-side); Excel dành cho admin/partner
+  if (req.user.role === 'user') {
+    return res.status(403).json({ error: 'Khách hàng chỉ xuất CSV; Excel dành cho admin/partner' });
+  }
 
   const entries = filterProcessEntries(getProcessEntries(targetId), req.query);
   try {

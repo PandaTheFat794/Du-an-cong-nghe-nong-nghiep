@@ -1,35 +1,40 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Tư vấn Nông nghiệp - Đăng nhập</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/css/base.css">
   <link rel="stylesheet" href="/css/auth.css">
 </head>
+
 <body>
   <div class="login-body">
     <div class="login-card">
       <div class="login-logo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/>
-          <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"
+          stroke-linejoin="round" aria-hidden="true">
+          <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
+          <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
         </svg>
       </div>
       <h1>Tư vấn Nông nghiệp</h1>
       <p class="login-sub">Chat trực tiếp với chuyên gia, kết nối đơn vị đồng hành</p>
 
       <div class="tabs" id="authTabs" role="tablist" aria-label="Đăng nhập hoặc đăng ký">
-        <button class="tab active" id="tabLogin" type="button" role="tab" aria-selected="true" aria-controls="loginForm" tabindex="0">Đăng nhập</button>
-        <button class="tab" id="tabRegister" type="button" role="tab" aria-selected="false" aria-controls="registerForm" tabindex="-1">Đăng ký</button>
+        <button class="tab active" id="tabLogin" type="button" role="tab" aria-selected="true" aria-controls="loginForm"
+          tabindex="0">Đăng nhập</button>
+        <button class="tab" id="tabRegister" type="button" role="tab" aria-selected="false" aria-controls="registerForm"
+          tabindex="-1">Đăng ký</button>
       </div>
 
       <div class="quick-login">
-        <span class="quick-login-label">Vào nhanh tài khoản demo</span>
         <div class="quick-login-row">
           <button class="quick-account" type="button" data-quick-user="user1" data-quick-pass="user123">
             <span class="quick-avatar role-user">KH</span>Khách hàng
@@ -44,25 +49,33 @@
       </div>
 
       <form id="loginForm">
-        <input class="form-field" type="text" id="loginUsername" placeholder="Tên đăng nhập" aria-label="Tên đăng nhập" autocomplete="username" required>
-        <input class="form-field" type="password" id="loginPassword" placeholder="Mật khẩu" aria-label="Mật khẩu" autocomplete="current-password" required>
+        <input class="form-field" type="text" id="loginUsername" placeholder="Tên đăng nhập" aria-label="Tên đăng nhập"
+          autocomplete="username" required>
+        <input class="form-field" type="password" id="loginPassword" placeholder="Mật khẩu" aria-label="Mật khẩu"
+          autocomplete="current-password" required>
         <button class="btn-primary" type="submit">Đăng nhập</button>
       </form>
 
       <form id="registerForm" hidden>
-        <input class="form-field" type="text" id="regDisplayName" placeholder="Họ và tên" aria-label="Họ và tên" required>
-        <input class="form-field" type="text" id="regUsername" placeholder="Tên đăng nhập" aria-label="Tên đăng nhập" autocomplete="username" required>
-        <input class="form-field" type="password" id="regPassword" placeholder="Mật khẩu" aria-label="Mật khẩu" autocomplete="new-password" required>
+        <input class="form-field" type="text" id="regDisplayName" placeholder="Họ và tên" aria-label="Họ và tên"
+          required>
+        <input class="form-field" type="text" id="regUsername" placeholder="Tên đăng nhập" aria-label="Tên đăng nhập"
+          autocomplete="username" required>
+        <input class="form-field" type="password" id="regPassword" placeholder="Mật khẩu" aria-label="Mật khẩu"
+          autocomplete="new-password" required>
         <button class="btn-primary" type="submit">Đăng ký</button>
       </form>
 
       <div class="auth-error" id="authError" hidden></div>
 
-      <p class="login-hint">Tài khoản test: admin/admin123 · partner1/admin123 · user1/user123</p>
     </div>
+    <a class="login-credit"
+      href="https://commons.wikimedia.org/wiki/File:Natural_landscape_of_Bangladesh._%E0%A6%AC%E0%A6%BE%E0%A6%82%E0%A6%B2%E0%A6%BE%E0%A6%A6%E0%A7%87%E0%A6%B6%E0%A7%87%E0%A6%B0_%E0%A6%AA%E0%A7%8D%E0%A6%B0%E0%A6%BE%E0%A6%95%E0%A7%83%E0%A6%A4%E0%A6%BF%E0%A6%95_%E0%A6%A6%E0%A7%83%E0%A6%B6%E0%A7%8D%E0%A6%AF.jpg"
+      target="_blank" rel="noopener noreferrer">Ảnh nền: Ashikul Islam Anik · CC BY 4.0</a>
   </div>
 
   <script src="/js/common.js"></script>
   <script src="/js/auth.js"></script>
 </body>
+
 </html>

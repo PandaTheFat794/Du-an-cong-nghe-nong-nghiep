@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const tabButtons = [...threadTabs.querySelectorAll('.view-tab')];
 
   // Drawer nhật ký canh tác (admin xem + xóa + chấm chất lượng, không thêm thay khách)
-  const processDrawer = createProcessDrawer({ canRate: true });
+  const processDrawer = createProcessDrawer({ canRate: true, canExcel: true });
   processBtn.addEventListener('click', () => {
     if (selectedUser) processDrawer.open(selectedUser.id, selectedUser.display_name);
   });

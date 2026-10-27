@@ -27,7 +27,7 @@ giao diện phong cách Zalo (xanh dương #0068FF).
 - **Nhật ký canh tác**: ghi hoạt động (gieo hạt, bón phân, tưới nước, phun thuốc, tỉa cành, thu hoạch, khác), ngày thực hiện, phương pháp, chi tiết và **tối đa 5 ảnh/tệp mỗi mục**.
   - Mục **Thu hoạch** nhập thêm **diện tích (ha), năng suất (tấn/ha), sản lượng (tấn)**; sản lượng tự tính = diện tích × năng suất nếu để trống, timeline hiện chip số liệu + tổng sản lượng.
   - Xem **đánh giá chất lượng 1–5 + nhận xét của admin** ngay trên mục nhật ký.
-  - Xem timeline có thống kê, lọc theo hoạt động/khoảng ngày/**mùa vụ**, xuất **CSV/Excel** (Excel có thêm sheet Tổng hợp), tự xóa mục của mình.
+  - Xem timeline có thống kê, lọc theo hoạt động/khoảng ngày/**mùa vụ**, xuất **CSV**, tự xóa mục của mình.
 - Lỗi mạng / bị rate-limit: tin chưa gửi được tự trả lại ô nhập, không mất nội dung.
 - Tab "Partner: <tên>" xuất hiện khi admin gán partner; chấm đỏ báo tin mới ở luồng còn lại.
 
@@ -49,10 +49,11 @@ giao diện phong cách Zalo (xanh dương #0068FF).
 
 **Chung**
 - Nhật ký realtime: khách thêm/xóa mục, admin chấm/sửa chất lượng → admin và partner đang được gán thấy cập nhật (socket `process-updated`).
-- **Báo cáo Excel (.xlsx)**: nhật ký của khách (sheet Nhật ký + Tổng hợp) và dashboard admin (6 sheet) — dùng ExcelJS, có định dạng cột, bộ lọc và auto-filter.
+- **Báo cáo Excel (.xlsx)**: admin/partner xuất nhật ký của khách (sheet Nhật ký + Tổng hợp); dashboard admin xuất 6 sheet — dùng ExcelJS, có định dạng cột, bộ lọc và auto-filter. Khách hàng chỉ dùng CSV.
 - Ghi âm tin nhắn thoại trực tiếp (MediaRecorder, tối đa 60 giây) ở cả 3 giao diện: bấm micro để ghi, dừng là tự tải lên và gửi; bubble có audio player phát lại.
 - Lịch sử chat phân trang (50 tin/trang, nút "Tải tin cũ hơn" giữ nguyên vị trí đọc).
 - Trang đăng nhập có 3 nút "Vào nhanh" cho tài khoản demo (Khách hàng / Admin / Partner): bấm là vào thẳng trang của role, không cần gõ mật khẩu.
+- **Nền đăng nhập**: ảnh cánh đồng lúa xanh (Wikimedia Commons, CC BY 4.0) phủ gradient xanh navy, ghi nguồn ảnh ở góc phải.
 - Hiệu ứng nền ambient, empty state động, toast thông báo, avatar chữ cái theo role, đèn trạng thái kết nối, responsive + `prefers-reduced-motion`.
 - Giao diện phong cách **Zalo**: xanh dương #0068FF, bubble tin của mình xanh nhạt chữ tối, bubble đối phương trắng, ô nhập pill + nút gửi tròn.
 - **Nền hiện đại**: aurora gradient xanh dương → indigo → mint rất nhẹ (cố định theo viewport), vùng chat có thêm lưới chấm mờ, sidebar/header dùng kính mờ (glassmorphism) để lộ màu nền.
@@ -178,7 +179,7 @@ Dự án đọc `.env` bằng `dotenv`; biến môi trường trong shell vẫn 
 | Nhật ký canh tác (hoạt động, ngày, phương pháp, ảnh) | ✅ | `process_entries` + drawer 3 role |
 | User cung cấp **năng suất, sản lượng** | ✅ | Mục Thu hoạch: diện tích (ha), năng suất (tấn/ha), sản lượng (tấn); tự tính sản lượng |
 | Admin **đánh giá chất lượng** | ✅ | Chấm 1–5 + nhận xét, cập nhật realtime; user/partner chỉ đọc |
-| Báo cáo tổng hợp | ✅ | CSV + Excel (nhật ký + dashboard 6 sheet) |
+| Báo cáo tổng hợp | ✅ | Khách: CSV; admin/partner: Excel (nhật ký + dashboard 6 sheet) |
 | Thống kê | ✅ | Dashboard 7/30/90 ngày + xuất Excel |
 | Bảo mật | ✅ | bcrypt, session SQLite, CSRF, rate-limit, whitelist upload |
 
@@ -198,15 +199,16 @@ Dự án đọc `.env` bằng `dotenv`; biến môi trường trong shell vẫn 
 3. Admin bấm **Đánh giá chất lượng** → chọn `5 · Rất tốt`, nhận xét “Hạt đều, ít sâu bệnh, đạt tiêu chuẩn xuất khẩu” → **Lưu đánh giá**.
 4. **User** mở lại nhật ký (hoặc nhận realtime) → thấy badge `Chất lượng: 5/5 · Rất tốt` + nhận xét. **Partner** xem được đánh giá này nhưng không sửa.
 5. **Xuất báo cáo**:
-   - Drawer nhật ký → **Xuất Excel** → `nhat-ky-khach-hang-test-2026-10-27.xlsx` gồm sheet **Nhật ký** (14 cột: hoạt động, ngày, diện tích, năng suất, sản lượng, chất lượng, nhận xét, đính kèm…) và sheet **Tổng hợp** (2 mục, 1 mục thu hoạch, 2 ha, 13 tấn, năng suất TB 6,5 tấn/ha, chất lượng TB 5.0, phân bố 5★: 1).
+   - **Khách hàng** → drawer nhật ký → **Xuất CSV** (cùng dữ liệu, có cột năng suất/sản lượng/chất lượng).
+   - **Admin** mở nhật ký khách → **Xuất Excel** → `nhat-ky-khach-hang-test-2026-10-27.xlsx` gồm sheet **Nhật ký** (14 cột: hoạt động, ngày, diện tích, năng suất, sản lượng, chất lượng, nhận xét, đính kèm…) và sheet **Tổng hợp** (2 mục, 1 mục thu hoạch, 2 ha, 13 tấn, năng suất TB 6,5 tấn/ha, chất lượng TB 5.0, phân bố 5★: 1).
    - Dashboard admin → **Xuất Excel** → `thong-ke-7-ngay-2026-10-27.xlsx` gồm **Tổng quan**, **Tin nhắn theo ngày**, **Hoạt động nhật ký**, **Top khách hàng**, **Nhật ký trong kỳ**, **Tổng hợp nhật ký**.
 6. Partner mở tab **Nhật ký canh tác** → thấy số liệu + đánh giá; bấm **Xuất Excel** để gửi báo cáo cho admin.
 
 ## Kiểm thử
 
 ```bash
-npm run e2e        # 202 test: REST + socket + upload + nhật ký (nhiều ảnh, năng suất/sản lượng, chất lượng) + Excel + 3 luồng chat + phân trang/tìm kiếm/around + rate-limit + session persist + CSRF + security + stats + Bot AI
-npm run ui-check   # 123 check UI trên Edge/Chrome headless (tự spawn server + DB riêng; ghi âm dùng micro giả; nhập năng suất tự tính sản lượng, admin chấm chất lượng, tải Excel, dashboard, tìm kiếm, lightbox, read receipt, popup hủy liên kết)
+npm run e2e        # 203 test: REST + socket + upload + nhật ký (nhiều ảnh, năng suất/sản lượng, chất lượng) + Excel + 3 luồng chat + phân trang/tìm kiếm/around + rate-limit + session persist + CSRF + security + stats + Bot AI
+npm run ui-check   # 124 check UI trên Edge/Chrome headless (tự spawn server + DB riêng; nhập năng suất tự tính sản lượng, admin chấm chất lượng, khách chỉ CSV, admin/partner tải Excel, dashboard, tìm kiếm, lightbox, read receipt, popup hủy liên kết)
 ```
 
 - `e2e` chạy server tạm ở port `3100`, DB `data/e2e.db` (luôn xóa trước khi chạy).
@@ -237,7 +239,7 @@ npm run ui-check   # 123 check UI trên Edge/Chrome headless (tự spawn server 
 | GET | `/api/partner/conversations` | Partner (kèm `process_count`, `message_count`, 2 thread id) |
 | GET | `/api/process?userId=` | Admin / owner / partner được gán |
 | POST | `/api/process` | User (tạo mục nhật ký; tối đa 5 tệp/mục; `area_ha`, `yield_per_ha`, `output_tons` không âm) |
-| GET | `/api/process/export?userId=&season=&activity=&from=&to=` | Admin / owner / partner được gán — Excel nhật ký (`Nhật ký` + `Tổng hợp`) |
+| GET | `/api/process/export?userId=&season=&activity=&from=&to=` | Admin / partner được gán — Excel nhật ký (`Nhật ký` + `Tổng hợp`); khách hàng chỉ dùng CSV |
 | POST | `/api/process/:id/quality` | Admin — chấm chất lượng `{ rating: 1..5, note? }` |
 | DELETE | `/api/process/:id` | Owner hoặc admin |
 | POST | `/api/upload` | Đã đăng nhập (rate-limit 30/10 phút/user) |
@@ -318,3 +320,9 @@ docs/screenshots/    # Ảnh cho README
 - Bot AI: rule-based còn giới hạn 12 chủ đề; có thể mở rộng KB, học từ phản hồi thật, thống kê câu hỏi bot không trả lời được.
 - Dashboard giới hạn 7/30/90 ngày; có thể bổ sung thống kê theo tháng/mùa vụ ngoài các khoảng này.
 - Có thể bổ sung thông báo push (Notification API + service worker).
+
+## Ghi nguồn ảnh
+
+- Ảnh nền trang đăng nhập: **“Natural landscape of Bangladesh”** — Ashikul Islam Anik,
+  [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Natural_landscape_of_Bangladesh._%E0%A6%AC%E0%A6%BE%E0%A6%82%E0%A6%B2%E0%A6%BE%E0%A6%A6%E0%A7%87%E0%A6%B6%E0%A7%87%E0%A6%B0_%E0%A6%AA%E0%A7%8D%E0%A6%B0%E0%A6%BE%E0%A6%95%E0%A7%83%E0%A6%A4%E0%A6%BF%E0%A6%95_%E0%A6%A6%E0%A7%83%E0%A6%B6%E0%A7%8D%E0%A6%AF.jpg),
+  giấy phép [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Ảnh được dùng làm nền, có phủ gradient.

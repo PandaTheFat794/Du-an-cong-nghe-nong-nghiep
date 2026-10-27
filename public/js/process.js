@@ -434,7 +434,7 @@ function renderProcessTimeline(container, entries, opts = {}) {
  * Drawer trượt từ phải, dùng cho trang User (thêm/xóa) và Admin (xem/xóa).
  * canAdd: hiện form thêm nhật ký. onChanged: callback sau khi thêm/xóa.
  */
-function createProcessDrawer({ canAdd = false, canRate = false, onChanged = null } = {}) {
+function createProcessDrawer({ canAdd = false, canRate = false, canExcel = false, onChanged = null } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'process-overlay';
   overlay.hidden = true;
@@ -571,6 +571,7 @@ function createProcessDrawer({ canAdd = false, canRate = false, onChanged = null
   const filterNote = overlay.querySelector('#processFilterNote');
   const exportBtn = overlay.querySelector('#processExportBtn');
   const excelBtn = overlay.querySelector('#processExcelBtn');
+  if (!canExcel) excelBtn.hidden = true; // khách hàng chỉ xuất CSV
 
   for (const season of PROCESS_SEASONS) {
     const option = document.createElement('option');

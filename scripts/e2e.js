@@ -364,11 +364,14 @@ async function main() {
 
   // ===== 2b3. Xuất Excel nhật ký + dashboard tổng hợp =====
   let xlsx = await fetchBinary('/api/process/export', user.cookie);
-  check('user xuất Excel nhật ký → file .xlsx hợp lệ',
-    xlsx.status === 200 && isXlsx(xlsx), `status ${xlsx.status}, ${xlsx.buf.length} bytes`);
+  check('🔍 khách hàng xuất Excel → 403 (chỉ dùng CSV)',
+    xlsx.status === 403, `status ${xlsx.status}`);
 
-  xlsx = await fetchBinary('/api/process/export?season=dong-xuan&activity=harvest', user.cookie);
-  check('🔍 xuất Excel có bộ lọc mùa vụ/hoạt động → 200',
+  xlsx = await fetchBinary(`/api/process/export?userId=${user.user.id}`);
+  check('🔍 xuất Excel khi chưa đăng nhập → 401', xlsx.status === 401, `status ${xlsx.status}`);
+
+  xlsx = await fetchBinary(`/api/process/export?userId=${user.user.id}&season=dong-xuan&activity=harvest`, admin.cookie);
+  check('🔍 admin xuất Excel có bộ lọc mùa vụ/hoạt động → 200',
     xlsx.status === 200 && isXlsx(xlsx), `status ${xlsx.status}`);
 
   xlsx = await fetchBinary(`/api/process/export?userId=${user.user.id}`, admin.cookie);

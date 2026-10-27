@@ -8,7 +8,10 @@
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: linear-gradient(165deg, #00398f 0%, #0068ff 52%, #2b7fff 100%);
+  /* Ảnh cánh đồng lúa (Wikimedia Commons, CC BY 4.0) + lớp phủ xanh navy để chữ trắng dễ đọc */
+  background:
+    linear-gradient(155deg, rgba(3, 30, 68, 0.76) 0%, rgba(0, 82, 204, 0.45) 46%, rgba(3, 52, 38, 0.62) 100%),
+    url("/images/login-field.jpg") center / cover no-repeat;
 }
 /* Khối blob trang trí phía sau */
 .login-body::before,
@@ -27,6 +30,15 @@
   from { transform: translate(0, 0) scale(1); }
   to { transform: translate(60px, 40px) scale(1.15); }
 }
+
+.login-credit {
+  position: absolute; right: 1rem; bottom: 0.8rem; z-index: 1;
+  font-size: 0.66rem; font-weight: 500;
+  color: rgba(255, 255, 255, 0.7); text-decoration: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: color var(--dur-fast);
+}
+.login-credit:hover { color: #fff; text-decoration: underline; }
 
 .login-card {
   position: relative;
@@ -122,4 +134,8 @@
   25% { transform: translateX(-6px); }
   50% { transform: translateX(5px); }
   75% { transform: translateX(-3px); }
+}
+
+@media (max-width: 640px) {
+  .login-credit { right: 50%; transform: translateX(50%); bottom: 0.5rem; }
 }
