@@ -209,12 +209,19 @@ Dự án đọc `.env` bằng `dotenv`; biến môi trường trong shell vẫn 
 ```bash
 npm run e2e        # 203 test: REST + socket + upload + nhật ký (nhiều ảnh, năng suất/sản lượng, chất lượng) + Excel + 3 luồng chat + phân trang/tìm kiếm/around + rate-limit + session persist + CSRF + security + stats + Bot AI
 npm run ui-check   # 124 check UI trên Edge/Chrome headless (tự spawn server + DB riêng; nhập năng suất tự tính sản lượng, admin chấm chất lượng, khách chỉ CSV, admin/partner tải Excel, dashboard, tìm kiếm, lightbox, read receipt, popup hủy liên kết)
+
+npm run benchmark          # đo API (p50/p95/p99, RPS) + page metrics (TTFB/FCP/LCP/CLS, page weight)
+npm run benchmark:baseline # đo và lưu .ecc/benchmarks/baseline.json
+npm run benchmark:compare  # đo và so sánh với baseline (BENCH_FAIL_ON_REGRESSION=1 để exit 1 khi có WARN)
 ```
 
 - `e2e` chạy server tạm ở port `3100`, DB `data/e2e.db` (luôn xóa trước khi chạy).
 - `ui-check` tự spawn server + DB `data/ui-check.db`, chụp screenshot vào `.verify/`.
   - Máy khác không có Edge/Chrome mặc định: set `UI_BROWSER=/đường/dẫn/browser`.
   - Chạy trên server sẵn có (DB phải mới): `UI_BASE=http://localhost:3000 npm run ui-check`.
+- `benchmark` tự spawn server port `3200` + DB `data/benchmark.db`, seed dataset xác định (540 tin nhắn, 30 nhật ký) trước khi đo; page metrics cần Edge/Chrome (`BENCH_SKIP_BROWSER=1` để bỏ qua, `UI_BROWSER` để chỉ định).
+  - Trên Windows, p95/p99/rps dao động ~16ms do scheduler — ưu tiên p50 khi đọc kết quả.
+  - `BENCH_REQUESTS`, `BENCH_CONCURRENCY`, `BENCH_PAGE_RUNS` để chỉnh tải; baseline git-tracked tại `.ecc/benchmarks/baseline.json`.
 - CI (GitHub Actions): job `e2e` chạy trên Node 20 và 22; job `ui-check` chạy trên Node 22 (dùng Google Chrome có sẵn của runner).
 
 ## API chính
@@ -307,6 +314,7 @@ public/              # index/chat/admin/partner.html, css/base.css, auth.css, ch
 public/js/process.js # timeline + drawer nhật ký dùng chung; lọc hoạt động/khoảng ngày/mùa vụ, nhiều ảnh + xuất CSV
 scripts/e2e.js       # E2E tự spawn server + DB tạm
 scripts/ui-check.js  # UI check headless (Playwright-core + Edge/Chrome)
+scripts/benchmark.js # Benchmark API + page metrics, lưu/so sánh baseline (.ecc/benchmarks/)
 docs/screenshots/    # Ảnh cho README
 ```
 

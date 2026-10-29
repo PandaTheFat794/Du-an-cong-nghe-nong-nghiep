@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node server.js",
     "e2e": "node scripts/e2e.js",
-    "ui-check": "node scripts/ui-check.js"
+    "ui-check": "node scripts/ui-check.js",
+    "benchmark": "node scripts/benchmark.js",
+    "benchmark:baseline": "node scripts/benchmark.js baseline",
+    "benchmark:compare": "node scripts/benchmark.js compare"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
